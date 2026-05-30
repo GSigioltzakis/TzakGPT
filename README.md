@@ -57,7 +57,6 @@ python main.py
 
 Type `exit` or `quit` to close the app.
 
-## Project Structure
 
 ## Notes
 
