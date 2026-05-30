@@ -48,7 +48,15 @@ All responses — regardless of which model produced them — are saved to a sha
 ```bash
 pip install requirements.txt
 ```
-
+### Configure environment
+ 
+Create a `.env` file in the project root:
+ 
+```
+GOOGLE_API_KEY=your_google_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+```
+ 
 ### Run
 
 ```bash
