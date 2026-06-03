@@ -50,12 +50,21 @@ def main():
     print_header()
     conversation_history = []
 
+    panel_color = "dodger_blue2" 
+
     while True:
-        user_prompt = console.input("\n[bold dodger_blue2]You ❯[/bold dodger_blue2] ")
+        user_prompt = console.input(f"\n[bold {panel_color}]You ❯[/bold {panel_color}] ")
         
         if user_prompt.lower() in ['exit', 'quit']:
-            console.print("[bold dodger_blue2]Ciao![/bold dodger_blue2]")
+            console.print(f"[bold {panel_color}]Ciao![/bold {panel_color}]")
             sys.exit()
+
+        if user_prompt.startswith("!d "):
+            panel_color = "gold1"
+            user_prompt = user_prompt[3:]
+        elif user_prompt.startswith("!f "):
+            panel_color = "dodger_blue2"
+            user_prompt = user_prompt[3:]
             
         if not user_prompt.strip():
             continue
@@ -107,13 +116,12 @@ def main():
         rendered_markdown = Markdown(winner_res)
         panel = Panel(
             rendered_markdown, 
-            title=f"[bold dodger_blue2] TzakGPT (via {winner_name})[/bold dodger_blue2]", 
+            title=f"[bold {panel_color}] TzakGPT (via {winner_name})[/bold {panel_color}]", 
             subtitle=f"[dim]{time_str}[/dim]",
-            border_style="dodger_blue2",
+            border_style=panel_color,
             padding=(1, 2)
         )
         
         console.print(panel)
-
 if __name__ == "__main__":
     main()
