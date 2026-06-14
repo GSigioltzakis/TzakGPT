@@ -5,10 +5,12 @@ import random
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Prompt
 from clients import ask_deepseek
+from soul import build_payload
 
 console = Console()
+
+
 def track_ai_speed(ai_function, history):
     start_time = time.time()
     response = ai_function(history)
@@ -63,10 +65,11 @@ def main():
             continue
 
         conversation_history.append({"role": "user", "content": user_prompt})
+        payload = build_payload(conversation_history, user_prompt)
 
         #Spinner
         with console.status("[bold cyan]Tzak is thinking...[/bold cyan]", spinner="dots"):
-            response, elapsed_time = track_ai_speed(ask_deepseek, conversation_history)
+            response, elapsed_time = track_ai_speed(ask_deepseek, payload)
 
         if response.startswith("DeepSeek Error:"):
             console.print(f"[bold red]{response}[/bold red]")
@@ -75,7 +78,6 @@ def main():
 
         time_str = f"{elapsed_time:.2f}s"
 
-        #Save to memory bank
         conversation_history.append({"role": "assistant", "content": response})
 
         #markdown panel
