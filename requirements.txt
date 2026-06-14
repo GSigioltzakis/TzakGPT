@@ -2,3 +2,4 @@ google-genai
 openai
 python-dotenv
 rich
+readchar
