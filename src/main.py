@@ -161,6 +161,7 @@ def handle_tool_call(tool_call, conversation_history) -> str:
     elif name == "run_command":
         cmd = args["cmd"]
         choice = confirm_command(cmd)
+        # Allow user to edit the command before running
         if isinstance(choice, tuple) and choice[0] == "e":
             cmd = choice[1]
             choice = confirm_command(cmd)
@@ -182,6 +183,7 @@ def handle_tool_call(tool_call, conversation_history) -> str:
 
 
 def agent_loop(conversation_history, payload, tools, panel_color):
+    # Tool-calling loop: keeps chatting with DeepSeek until we get a final text response
     max_iterations = 10
     iteration = 0
     turn_input = 0
@@ -206,6 +208,7 @@ def agent_loop(conversation_history, payload, tools, panel_color):
         if kind == "text":
             return message, (turn_input, turn_output)
 
+        # Append assistant's tool-call message so DeepSeek sees its own choices
         assistant_msg = {
             "role": "assistant",
             "content": message.content or "",
@@ -276,6 +279,7 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
             return True
         conversation_history.clear()
         console.print("[dim]History cleared.[/dim]")
+        # Offer to also delete the most recent saved session file
         os.makedirs(SESSION_DIR, exist_ok=True)
         existing = sorted(
             [f for f in os.listdir(SESSION_DIR) if f.endswith(".json")],
