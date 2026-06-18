@@ -6,9 +6,6 @@ import clients
 SHELL_ACTIONS = {"run_command"}
 FILE_ACTIONS = {"read_file", "write_file", "list_directory"}
 
-WINDOW_TRIGGER = 10
-WINDOW_KEEP = 6
-
 TOOLS_DEFINITION = [
     {
         "type": "function",
@@ -95,15 +92,25 @@ NARRATION AND SELF-VERIFICATION RULES:
 
 
 def _apply_sliding_window(conversation_history: list) -> list:
-    """Collapse old turns into a summary when the conversation grows too long."""
+    """Collapse old turns into a summary when the conversation grows too long.
+
+    Uses a dynamic keep window: for N user turns, keeps from floor(N/2)+1 onward.
+    Conversations with 6 or fewer user turns are left untouched.
+    """
     user_turns = [m for m in conversation_history if m.get("role") == "user"]
-    if len(user_turns) <= WINDOW_TRIGGER:
+    n = len(user_turns)
+
+    # Don't collapse small conversations
+    if n <= 6:
         return conversation_history
 
-    keep_messages = WINDOW_KEEP * 2
-    split_index = len(conversation_history) - keep_messages
-    if split_index < 0:
-        split_index = 0
+    # Keep from floor(n/2)+1 onward (1-based user-turn index)
+    keep_from_turn = n // 2 + 1
+    # Convert to 0-based message index: user turns alternate starting at index 0
+    split_index = (keep_from_turn - 1) * 2
+
+    if split_index <= 0:
+        return conversation_history
 
     old_part = conversation_history[:split_index]
     recent_part = conversation_history[split_index:]

@@ -5,6 +5,16 @@ from dotenv import load_dotenv
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(SCRIPT_DIR, "../.env"))
 
+# Default model — can be changed at runtime via set_model()
+_model = "deepseek-v4-flash"
+
+
+def set_model(model: str):
+    """Dynamically change the model used for all subsequent API calls."""
+    global _model
+    _model = model
+
+
 def ask_deepseek(history, tools=None):
     try:
         api_key = os.getenv("DEEP_KEY")
@@ -13,7 +23,7 @@ def ask_deepseek(history, tools=None):
 
         client = OpenAI(base_url="https://api.deepseek.com", api_key=api_key)
 
-        kwargs = {"model": "deepseek-chat", "messages": history}
+        kwargs = {"model": _model, "messages": history}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"

@@ -11,23 +11,78 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
-from clients import ask_deepseek
+from clients import ask_deepseek, set_model
 from soul import build_payload, classify_action
 from tools import read_file, write_file, run_command, list_directory
 from display import show_diff, show_action, show_result, confirm_command
 
 from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
+from prompt_toolkit.completion import Completer, Completion
 
 import session
+
+# ---------------------------------------------------------------------------
+# Non-blocking stop-key check (Windows only)
+# ---------------------------------------------------------------------------
+try:
+    import msvcrt
+
+    def check_stop_key() -> bool:
+        """Return True if the user pressed X (case-insensitive) to interrupt thinking."""
+        while msvcrt.kbhit():
+            key = msvcrt.getch().lower()
+            if key == b"x":
+                # Consume any leftover buffered keystrokes from the same burst
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+                return True
+        return False
+
+except ImportError:
+    # Non-Windows fallback — stop key not supported
+    def check_stop_key() -> bool:
+        return False
+
 
 console = Console()
 
 SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
 CONTEXT_WARNING_THRESHOLD = 50000
+
+# ---------------------------------------------------------------------------
+# Slash-command definitions (single source of truth)
+# ---------------------------------------------------------------------------
+SLASH_COMMANDS = {
+    "/help":   "Show this help message",
+    "/clear":  "Reset conversation history (with confirmation)",
+    "/status": "Show session activity log",
+    "/tokens": "Show token usage statistics",
+    "/save":   "Save session checkpoint to disk",
+    "/load":   "Load a saved session",
+    "/model":  "Switch model: /model pro  or  /model flash",
+}
+
+
+# ---------------------------------------------------------------------------
+# Custom completer — ONLY pops up when input starts with "/"
+# ---------------------------------------------------------------------------
+class SlashCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        # Only activate when the input starts with a slash
+        if not text.startswith("/"):
+            return
+        # Show all slash commands that match what's been typed so far
+        for cmd, desc in SLASH_COMMANDS.items():
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display_meta=desc,
+                )
 
 
 def get_header_text() -> str:
@@ -54,23 +109,43 @@ def get_header_text() -> str:
     )
 
 
+def _next_sequential_name() -> str:
+    """Scan SESSION_DIR for session_NNN.json files and return the next name."""
+    os.makedirs(SESSION_DIR, exist_ok=True)
+    highest = 0
+    for f in os.listdir(SESSION_DIR):
+        if f.startswith("session_") and f.endswith(".json"):
+            try:
+                num = int(f[len("session_"):-len(".json")])
+                if num > highest:
+                    highest = num
+            except ValueError:
+                pass
+    return f"session_{highest + 1:03d}.json"
+
+
+def _unique_path(filename: str) -> str:
+    """Return a unique save path.  Auto-increments a counter if the file exists."""
+    base, ext = os.path.splitext(filename)
+    if ext != ".json":
+        ext = ".json"
+    candidate = os.path.join(SESSION_DIR, f"{base}{ext}")
+    if not os.path.exists(candidate):
+        return candidate
+    counter = 1
+    while True:
+        candidate = os.path.join(SESSION_DIR, f"{base}_{counter:03d}{ext}")
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
+
 def save_session(conversation_history, filename=None):
     os.makedirs(SESSION_DIR, exist_ok=True)
     if filename:
-        save_path = os.path.join(SESSION_DIR, filename)
-        if not save_path.endswith(".json"):
-            save_path += ".json"
+        save_path = _unique_path(filename)
     else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = os.path.join(SESSION_DIR, f"{timestamp}.json")
-
-    if os.path.exists(save_path):
-        console.print(f"[yellow]  File '{os.path.basename(save_path)}' already exists. Overwrite? [Y/N][/yellow] ", end="")
-        key = readchar.readkey().lower()
-        if key != "y":
-            console.print("[dim]Cancelled.[/dim]")
-            return False
-        console.print("[bold green]Y[/bold green]")
+        save_path = os.path.join(SESSION_DIR, _next_sequential_name())
 
     data = {
         "timestamp": datetime.now().isoformat(),
@@ -190,6 +265,11 @@ def agent_loop(conversation_history, payload, tools, panel_color):
     turn_output = 0
 
     while iteration < max_iterations:
+        # --- Stop-key check before each API call ---
+        if check_stop_key():
+            console.print("[dim]  Thinking interrupted.[/dim]")
+            return "[Interrupted by user]", (turn_input, turn_output)
+
         iteration += 1
 
         with console.status(
@@ -227,6 +307,11 @@ def agent_loop(conversation_history, payload, tools, panel_color):
         payload.append(assistant_msg)
 
         for tool_call in message.tool_calls:
+            # --- Stop-key check before each tool execution ---
+            if check_stop_key():
+                console.print("[dim]  Thinking interrupted.[/dim]")
+                return "[Interrupted by user]", (turn_input, turn_output)
+
             result_json = handle_tool_call(tool_call, conversation_history)
             result_data = json.loads(result_json)
             payload.append(
@@ -252,22 +337,30 @@ def show_token_line(turn_input: int, turn_output: int):
         )
 
 
+def _slash_command_table() -> Table:
+    """Return the Rich Table listing all slash commands."""
+    table = Table(title="Slash Commands", title_style="bold cyan", box=None)
+    table.add_column("Command", style="bold dodger_blue2", width=10)
+    table.add_column("Description", style="dim")
+    for cmd, desc in SLASH_COMMANDS.items():
+        table.add_row(cmd, desc)
+    return table
+
+
 def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bool:
-    parts = cmd_line.strip().split()
-    command = parts[0].lower()
+    """Return True if the input was consumed as a slash command; False to pass through to AI."""
+    stripped = cmd_line.strip()
+    parts = stripped.split()
+    command = parts[0].lower() if parts else ""
     arg = " ".join(parts[1:]) if len(parts) > 1 else ""
 
+    # "/" alone — show help table
+    if stripped == "/":
+        console.print(_slash_command_table())
+        return True
+
     if command == "/help":
-        table = Table(title="Slash Commands", title_style="bold cyan", box=None)
-        table.add_column("Command", style="bold dodger_blue2", width=10)
-        table.add_column("Description", style="dim")
-        table.add_row("/help", "Show this help message")
-        table.add_row("/clear", "Reset conversation history (with confirmation)")
-        table.add_row("/status", "Show session activity log")
-        table.add_row("/tokens", "Show token usage statistics")
-        table.add_row("/save", "Save session checkpoint to disk")
-        table.add_row("/load", "Load a saved session")
-        console.print(table)
+        console.print(_slash_command_table())
         return True
 
     if command == "/clear":
@@ -333,8 +426,65 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
         load_session(conversation_history, filename=name)
         return True
 
-    console.print("[yellow]Unknown command. Type /help for available commands.[/yellow]")
-    return True
+    if command == "/model":
+        choice = arg.strip().lower() if arg else ""
+        if not choice:
+            # Prompt interactively
+            console.print(
+                "[bold]Switch model:[/bold] [bold dodger_blue2][F][/bold dodger_blue2]lash or "
+                "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](Esc to cancel)[/dim] ",
+                end="",
+            )
+            key = readchar.readkey().lower()
+            if key in ("\x1b",):
+                console.print("[dim]Cancelled.[/dim]")
+                return True
+            elif key == "p":
+                choice = "pro"
+                console.print("[bold dodger_blue2]Pro[/bold dodger_blue2]")
+            elif key in ("\r", "\n", "f"):
+                choice = "flash"
+                console.print("[bold dodger_blue2]Flash[/bold dodger_blue2]")
+            else:
+                console.print("[dim]Unrecognised — no change.[/dim]")
+                return True
+
+        if choice == "pro":
+            set_model("deepseek-v4-pro")
+            console.print("[dim]Model switched to: deepseek-v4-pro[/dim]")
+            session.record("model_change", "deepseek-v4-pro")
+        elif choice == "flash":
+            set_model("deepseek-v4-flash")
+            console.print("[dim]Model switched to: deepseek-v4-flash[/dim]")
+            session.record("model_change", "deepseek-v4-flash")
+        else:
+            console.print(f"[yellow]Unknown model: {choice}. Use 'pro' or 'flash'.[/yellow]")
+        return True
+
+    # Unknown slash command — let it pass through to the AI
+    return False
+
+
+def _choose_model() -> tuple:
+    """Prompt the user to choose a model. Returns (model_key, display_name)."""
+    console.print(
+        "\n[bold]Choose model:[/bold] [bold dodger_blue2][F][/bold dodger_blue2]lash or "
+        "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](default: F)[/dim] ",
+        end="",
+    )
+    key = readchar.readkey().lower()
+    if key == "p":
+        console.print("[bold dodger_blue2]Pro[/bold dodger_blue2]")
+        return "deepseek-v4-pro", "Pro"
+    elif key in ("\r", "\n", "f"):
+        if key == "f":
+            console.print("[bold dodger_blue2]Flash[/bold dodger_blue2]")
+        else:
+            console.print("[dim]Flash  (default)[/dim]")
+        return "deepseek-v4-flash", "Flash"
+    else:
+        console.print(f"[dim]Unrecognised input — using default (Flash)[/dim]")
+        return "deepseek-v4-flash", "Flash"
 
 
 def main():
@@ -390,8 +540,11 @@ def main():
     else:
         console.print(header_content)
 
-    slash_commands = ["/help", "/clear", "/status", "/tokens", "/save", "/load"]
-    command_completer = WordCompleter(slash_commands, ignore_case=True)
+    # --- Model selection ---
+    model_key, model_name = _choose_model()
+    set_model(model_key)
+    console.print(f"[dim]Model: deepseek-v4-{model_name.lower()}[/dim]")
+
     tza_style = Style.from_dict(
         {
             "completion-menu.completion": "bg:#0f2b4a fg:#ffffff",
@@ -399,23 +552,32 @@ def main():
         }
     )
 
+    # The slash completer — only shows the dropdown when input starts with "/"
+    slash_completer = SlashCompleter()
+
     while True:
         pt_color = "dodgerblue" if panel_color == "dodger_blue2" else "gold"
         print()
         user_prompt = prompt(
             HTML(f'<b><style color="{pt_color}">(O__o) You ❯</style></b> '),
-            completer=command_completer,
             style=tza_style,
+            completer=slash_completer,
         )
 
         if user_prompt.lower() in ["exit", "quit"]:
             console.print(f"[bold {panel_color}]Ciao![/bold {panel_color}]")
             sys.exit()
 
+        # --- Typing JUST "/" (and nothing else) shows the slash-command table ---
+        if user_prompt is not None and user_prompt.strip() == "/":
+            console.print(_slash_command_table())
+            continue
+
         if user_prompt.startswith("/"):
             handled = handle_slash_command(user_prompt, conversation_history, panel_color)
             if handled:
                 continue
+            # If not handled, falls through — send to AI as a normal message
 
         if user_prompt.startswith("!d") or user_prompt.startswith("!f"):
             prefix = user_prompt[:2]
