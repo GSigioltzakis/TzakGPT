@@ -51,6 +51,7 @@ console = Console()
 SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
 CONTEXT_WARNING_THRESHOLD = 50000
+MAX_CONTEXT_TOKENS = 128000
 
 # ---------------------------------------------------------------------------
 # Slash-command definitions (single source of truth)
@@ -325,15 +326,25 @@ def agent_loop(conversation_history, payload, tools, panel_color):
     return "Reached maximum tool iterations.", (turn_input, turn_output)
 
 
+def _build_token_bar(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
+    """Return a 10-character progress bar showing context usage."""
+    fill = min(total_tokens / max_tokens, 1.0)
+    filled_blocks = int(fill * 10)
+    return "█" * filled_blocks + "░" * (10 - filled_blocks)
+
+
 def show_token_line(turn_input: int, turn_output: int):
     turn_total = turn_input + turn_output
     totals = session.get_token_totals()
+    bar = _build_token_bar(totals["total"])
+    pct = min(totals["total"] / MAX_CONTEXT_TOKENS * 100, 100)
     console.print(
-        f"[dim]  tokens: {turn_total} this turn / {totals['total']} session  ({totals['turns']} turns)[/dim]"
+        f"[dim]  [{bar}] {pct:>3.0f}%  {totals['total']:>6,} / {MAX_CONTEXT_TOKENS:,} tokens  "
+        f"({totals['turns']} turn{'s' if totals['turns'] != 1 else ''})[/dim]"
     )
     if totals["total"] > CONTEXT_WARNING_THRESHOLD:
         console.print(
-            "[yellow]  context filling up — consider /clear or /save before continuing[/yellow]"
+            "[yellow]  ⚠  context filling up — consider /clear or /save before continuing[/yellow]"
         )
 
 
@@ -399,11 +410,14 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
 
     if command == "/tokens":
         totals = session.get_token_totals()
+        bar = _build_token_bar(totals["total"])
+        pct = min(totals["total"] / MAX_CONTEXT_TOKENS * 100, 100)
         console.print(f"[bold]Token Usage[/bold]")
         console.print(f"  [dim]Turns:   [/dim]{totals['turns']}")
-        console.print(f"  [dim]Input:   [/dim]{totals['input']}")
-        console.print(f"  [dim]Output:  [/dim]{totals['output']}")
-        console.print(f"  [dim]Total:   [/dim]{totals['total']}")
+        console.print(f"  [dim]Input:   [/dim]{totals['input']:>6,}")
+        console.print(f"  [dim]Output:  [/dim]{totals['output']:>6,}")
+        console.print(f"  [dim]Total:   [/dim]{totals['total']:>6,}")
+        console.print(f"  [dim]Context: [/dim][{bar}] {pct:.0f}%  ({totals['total']:,} / {MAX_CONTEXT_TOKENS:,})")
         return True
 
     if command == "/save":
@@ -432,7 +446,7 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
             # Prompt interactively
             console.print(
                 "[bold]Switch model:[/bold] [bold dodger_blue2][F][/bold dodger_blue2]lash or "
-                "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](Esc to cancel)[/dim] ",
+                "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](Esc to cancel, Enter default Flash)[/dim] ",
                 end="",
             )
             key = readchar.readkey().lower()
@@ -442,9 +456,12 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
             elif key == "p":
                 choice = "pro"
                 console.print("[bold dodger_blue2]Pro[/bold dodger_blue2]")
-            elif key in ("\r", "\n", "f"):
+            elif key == "f":
                 choice = "flash"
                 console.print("[bold dodger_blue2]Flash[/bold dodger_blue2]")
+            elif key in ("\r", "\n"):
+                choice = "flash"
+                console.print("[bold dodger_blue2]Flash  (default)[/bold dodger_blue2]")
             else:
                 console.print("[dim]Unrecognised — no change.[/dim]")
                 return True
@@ -469,18 +486,18 @@ def _choose_model() -> tuple:
     """Prompt the user to choose a model. Returns (model_key, display_name)."""
     console.print(
         "\n[bold]Choose model:[/bold] [bold dodger_blue2][F][/bold dodger_blue2]lash or "
-        "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](default: F)[/dim] ",
+        "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](default: Flash)[/dim] ",
         end="",
     )
     key = readchar.readkey().lower()
-    if key == "p":
+    if key == "f":
+        console.print("[bold dodger_blue2]Flash[/bold dodger_blue2]")
+        return "deepseek-v4-flash", "Flash"
+    elif key == "p":
         console.print("[bold dodger_blue2]Pro[/bold dodger_blue2]")
         return "deepseek-v4-pro", "Pro"
-    elif key in ("\r", "\n", "f"):
-        if key == "f":
-            console.print("[bold dodger_blue2]Flash[/bold dodger_blue2]")
-        else:
-            console.print("[dim]Flash  (default)[/dim]")
+    elif key in ("\r", "\n"):
+        console.print("[dim]Flash  (default)[/dim]")
         return "deepseek-v4-flash", "Flash"
     else:
         console.print(f"[dim]Unrecognised input — using default (Flash)[/dim]")
