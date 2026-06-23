@@ -1,5 +1,5 @@
 import re
-import random
+import shutil
 import readchar
 from rich.console import Console
 from rich.panel import Panel
@@ -7,21 +7,39 @@ from rich import box
 
 console = Console()
 
-_BOX_COLORS = [
-    "red", "green", "yellow", "blue", "magenta", "cyan",
-    "bright_red", "bright_green", "bright_yellow", "bright_blue",
-    "bright_magenta", "bright_cyan", "orange1", "purple4",
-    "spring_green2", "deep_sky_blue1", "salmon1", "plum1",
-]
+
+# ---------------------------------------------------------------------------
+# Diff / action border colours — tied to action type, not random
+# ---------------------------------------------------------------------------
+def _diff_border_style(action: str = "write"):
+    """Return a border colour keyed to the action type.
+
+    Writes  → green   (creating / changing)
+    Reads   → blue    (inspecting)
+    Shell   → yellow  (caution)
+    """
+    styles = {
+        "write": "bright_green",
+        "read":  "bright_blue",
+        "shell": "bright_yellow",
+    }
+    return styles.get(action, "bright_green")
 
 
-def _random_border_style():
-    return random.choice(_BOX_COLORS)
+# ---------------------------------------------------------------------------
+# Action colours per tool type
+# ---------------------------------------------------------------------------
+_ACTION_STYLES = {
+    "Reading": "bold bright_blue",
+    "Writing": "bold bright_yellow",
+    "Listing": "bold cyan",
+    "Running": "bold yellow",
+}
 
 
-def show_diff(diff: list):
+def show_diff(diff: list, action: str = "write"):
     if not diff:
-        console.print("[dim]  No changes.[/dim]")
+        console.print("[dim]    No changes.[/dim]")
         return
 
     old_line = 0
@@ -47,14 +65,28 @@ def show_diff(diff: list):
             new_line += 1
 
     if lines:
+        # Adaptive width: fit the terminal, capped at 120
+        term_width = shutil.get_terminal_size().columns
+        diff_width = min(term_width - 10, 120)
+        if diff_width < 40:
+            diff_width = 40
+
         content = "\n".join(lines)
-        panel = Panel(content, border_style=_random_border_style(), padding=(0, 1), width=80, box=box.SQUARE)
+        panel = Panel(
+            content,
+            border_style=_diff_border_style(action),
+            padding=(0, 1),
+            width=diff_width,
+            box=box.SQUARE,
+        )
         console.print(panel)
 
 
 def show_action(label: str, detail: str = ""):
+    style = _ACTION_STYLES.get(label, "bold cyan")
     detail_str = f" [dim]{detail}[/dim]" if detail else ""
-    console.print(f"[bold cyan]  {label}[/bold cyan]{detail_str}")
+    # Subtle indent so actions nest visually under the assistant's response
+    console.print(f"  [{style}]{label}[/{style}]{detail_str}")
 
 
 def show_result(output: str):
@@ -62,7 +94,7 @@ def show_result(output: str):
 
 
 def confirm_command(cmd: str) -> str:
-    console.print(f"\n[bold yellow]  Run command:[/bold yellow] [white]{cmd}[/white]")
+    console.print(f"\n[bold yellow]  About to run:[/bold yellow] [white]{cmd}[/white]")
     console.print("[dim]  [Y] Run   [N] Skip   [E] Edit[/dim]  ", end="")
     while True:
         key = readchar.readkey().lower()

@@ -10,9 +10,12 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.text import Text
 
-from clients import ask_deepseek, set_model
-from soul import build_payload, classify_action
+from clients import ask_deepseek, ask_deepseek_stream, set_model, get_model_display
+from soul import build_payload, classify_action, GREETINGS, SYSTEM_PROMPT
 from tools import read_file, write_file, run_command, list_directory
 from display import show_diff, show_action, show_result, confirm_command
 
@@ -50,8 +53,21 @@ console = Console()
 
 SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
-CONTEXT_WARNING_THRESHOLD = 50000
-MAX_CONTEXT_TOKENS = 128000
+CONTEXT_WARNING_THRESHOLD = 300000
+MAX_CONTEXT_TOKENS = 600000
+
+# ---------------------------------------------------------------------------
+# Completion bell (Phase 9.1) — off by default, togglable via /bell or env var
+# ---------------------------------------------------------------------------
+_BELL_ENABLED = os.getenv("TZAK_BELL", "").strip().lower() in ("true", "1", "yes")
+
+
+def _ring_bell():
+    """Ring the terminal bell if enabled."""
+    if _BELL_ENABLED:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+
 
 # ---------------------------------------------------------------------------
 # Slash-command definitions (single source of truth)
@@ -64,7 +80,57 @@ SLASH_COMMANDS = {
     "/save":   "Save session checkpoint to disk",
     "/load":   "Load a saved session",
     "/model":  "Switch model: /model pro  or  /model flash",
+    "/bell":   "Toggle completion bell on / off",
 }
+
+# ---------------------------------------------------------------------------
+# Spinner text pool — cycled during tool execution pauses and thinking phase
+# ---------------------------------------------------------------------------
+_SPINNER_TEXTS = [
+    "Thinking...",
+    "Reading your files...",
+    "Consulting DeepSeek...",
+    "Almost done...",
+    "Working on it...",
+]
+_spinner_idx = 0
+
+
+def _next_spinner_text() -> str:
+    global _spinner_idx
+    text = _SPINNER_TEXTS[_spinner_idx % len(_SPINNER_TEXTS)]
+    _spinner_idx += 1
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Cyclable Spinner renderable — wraps Rich Spinner with rotating text
+# ---------------------------------------------------------------------------
+class _CyclingSpinner:
+    """A renderable that shows a spinner with text that cycles from the pool.
+
+    Each time Rich renders this (via Live's refresh loop), the spinner frame
+    advances and — after a full rotation — the text rotates to the next phrase.
+    """
+    def __init__(self, spinner_name: str = "dots"):
+        self._spinner = Spinner(spinner_name, text="")
+        self._text_idx = 0
+        self._texts = _SPINNER_TEXTS
+        self._frame_count = 0
+        self._frames_per_text = 40  # roughly 2.7 seconds at 15 fps
+
+    def __rich_console__(self, console, options):
+        # Advance frame and possibly rotate text
+        self._frame_count += 1
+        if self._frame_count >= self._frames_per_text:
+            self._frame_count = 0
+            self._text_idx = (self._text_idx + 1) % len(self._texts)
+        # Use Text.from_markup as class method — self._spinner._text may be a
+        # plain str (no .from_markup), but Text.from_markup always works.
+        self._spinner._text = Text.from_markup(
+            f"[dim]{self._texts[self._text_idx]}[/dim]"
+        )
+        yield from self._spinner.__rich_console__(console, options)
 
 
 # ---------------------------------------------------------------------------
@@ -93,19 +159,13 @@ def get_header_text() -> str:
    ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝   ██║   
    ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝    ██║   
    ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║        ██║   
-   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚══════╝╚═╝        ╚═╝
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚══════╝╚═╝        ╚═╝   
     """
-    greetings = [
-        "Today is a beautiful day full of happiness. Let's build something great!",
-        "The flowers are blooming, the sky is shining, and the code is running.",
-        "The top of the mountain awaits, one step at a time.",
-        "Clear skies ahead. What shall we discover today?",
-        "A fresh start, a blank terminal, and infinite possibilities.",
-    ]
+    greeting = random.choice(GREETINGS)
     return (
         f"[bold dodger_blue2]{logo}[/bold dodger_blue2]\n"
-        "[bold cyan]Welcome to TzakGPT AI agent CLI.[/bold cyan]\n"
-        f"[italic pale_green1]{random.choice(greetings)}[/]\n"
+        f"[bold cyan]Welcome to TzakGPT AI agent CLI.[/bold cyan]\n"
+        f"[italic pale_green1]{greeting}[/]\n"
         "[dim]Type 'exit' or 'quit' to close the app.[/dim]"
     )
 
@@ -163,6 +223,48 @@ def save_session(conversation_history, filename=None):
     return True
 
 
+# ---------------------------------------------------------------------------
+# Session metadata helpers (Phase 6.1)
+# ---------------------------------------------------------------------------
+def _relative_time(ts_str: str) -> str:
+    """Return a human-friendly relative time string from an ISO timestamp."""
+    try:
+        dt = datetime.fromisoformat(ts_str)
+        diff = datetime.now() - dt
+        if diff.days > 0:
+            return f"{diff.days}d ago"
+        hours = diff.seconds // 3600
+        if hours > 0:
+            return f"{hours}h ago"
+        minutes = diff.seconds // 60
+        if minutes > 0:
+            return f"{minutes}m ago"
+        return "just now"
+    except Exception:
+        return ""
+
+
+def _parse_session_metadata(filepath: str) -> dict:
+    """Extract lightweight metadata from a session file without loading full history."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        turns = data.get("token_totals", {}).get("turns", 0)
+        # Determine model from session log
+        model = "flash"
+        for entry in data.get("session_log", []):
+            if entry.get("action") == "model_change":
+                detail = entry.get("detail", "")
+                if "pro" in detail.lower():
+                    model = "pro"
+                elif "flash" in detail.lower():
+                    model = "flash"
+        ts_str = data.get("timestamp", "")
+        return {"turns": turns, "model": model, "timestamp": ts_str}
+    except Exception:
+        return {"turns": 0, "model": "?", "timestamp": ""}
+
+
 def load_session(conversation_history, filename=None):
     os.makedirs(SESSION_DIR, exist_ok=True)
     session_files = sorted(
@@ -176,7 +278,13 @@ def load_session(conversation_history, filename=None):
     if not filename:
         console.print("\n[bold]Available sessions:[/bold]")
         for i, sf in enumerate(session_files[:10], 1):
-            console.print(f"  [{i}] {sf}")
+            filepath = os.path.join(SESSION_DIR, sf)
+            meta = _parse_session_metadata(filepath)
+            rel_time = _relative_time(meta["timestamp"])
+            console.print(
+                f"  [{i}] [bold]{sf}[/bold]"
+                f"  [dim]{meta['turns']} turns   {meta['model']}   {rel_time}[/dim]"
+            )
         console.print("[dim]  Select [1-N] or press Enter to cancel: [/dim]", end="")
         key = readchar.readkey()
         if key in ("\r", "\n", ""):
@@ -215,6 +323,7 @@ def load_session(conversation_history, filename=None):
 
 
 def handle_tool_call(tool_call, conversation_history) -> str:
+    """Execute a single tool call. Returns JSON result string for the API."""
     name = tool_call.function.name
     args = json.loads(tool_call.function.arguments)
 
@@ -236,8 +345,8 @@ def handle_tool_call(tool_call, conversation_history) -> str:
         session.record("list_directory", path)
     elif name == "run_command":
         cmd = args["cmd"]
+        # Confirm BEFORE entering any status display (user needs to interact)
         choice = confirm_command(cmd)
-        # Allow user to edit the command before running
         if isinstance(choice, tuple) and choice[0] == "e":
             cmd = choice[1]
             choice = confirm_command(cmd)
@@ -258,74 +367,212 @@ def handle_tool_call(tool_call, conversation_history) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Streaming agent loop (Phases 2 & 3)
+# ---------------------------------------------------------------------------
 def agent_loop(conversation_history, payload, tools, panel_color):
-    # Tool-calling loop: keeps chatting with DeepSeek until we get a final text response
+    """Chat loop with streaming responses. Returns (response_text, usage_tuple, tool_count)."""
     max_iterations = 10
     iteration = 0
     turn_input = 0
     turn_output = 0
+    tool_count = 0
 
     while iteration < max_iterations:
         # --- Stop-key check before each API call ---
         if check_stop_key():
-            console.print("[dim]  Thinking interrupted.[/dim]")
-            return "[Interrupted by user]", (turn_input, turn_output)
+            console.print("[dim]  Interrupted.[/dim]")
+            return "[Interrupted by user]", (turn_input, turn_output), tool_count
 
         iteration += 1
 
-        with console.status(
-            "[bold cyan]Tzak is thinking...[/bold cyan]", spinner="dots"
-        ):
-            kind, message, usage = ask_deepseek(payload, tools)
+        stream = ask_deepseek_stream(payload, tools)
+        collected_text = ""
+        tool_calls_received = None
+        stream_usage = {"input": 0, "output": 0}
+        error_msg = None
 
-        session.add_tokens(usage["input"], usage["output"])
-        turn_input += usage["input"]
-        turn_output += usage["output"]
+        title = f"[bold {panel_color}] TzakGPT (via DeepSeek)[/bold {panel_color}]"
 
-        if kind is None:
-            console.print(f"[bold red]{message}[/bold red]")
-            return None, None
+        # --- Streaming display with Live panel ---
+        # transient=True: streaming preview vanishes after loop exits,
+        # so only the final polished panel from main() stays visible.
+        with Live(console=console, refresh_per_second=15, transient=True) as live:
+            # Show animated spinner + cycling text while waiting for the first
+            # token.  A short sleep gives the spinner a render frame before the
+            # stream iterator blocks on the network, so it "lands" visually.
+            thinking_spinner = _CyclingSpinner("dots")
+            live.update(Panel(
+                thinking_spinner,
+                title=title,
+                border_style=panel_color,
+                padding=(0, 2),
+            ))
+            time.sleep(0.15)
 
-        if kind == "text":
-            return message, (turn_input, turn_output)
+            for event in stream:
+                # Stop-key check between chunks
+                if check_stop_key():
+                    live.update(Panel(
+                        "[dim]Interrupted.[/dim]",
+                        title=title,
+                        border_style=panel_color,
+                    ))
+                    return "[Interrupted by user]", (turn_input, turn_output), tool_count
 
-        # Append assistant's tool-call message so DeepSeek sees its own choices
-        assistant_msg = {
-            "role": "assistant",
-            "content": message.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in message.tool_calls
-            ],
-        }
-        payload.append(assistant_msg)
+                if event[0] == "error":
+                    error_msg = event[1]
+                    break
+                elif event[0] == "text":
+                    collected_text += event[1]
+                    md = Markdown(collected_text)
+                    live.update(Panel(
+                        md,
+                        title=title,
+                        border_style=panel_color,
+                        padding=(1, 2),
+                    ))
+                elif event[0] == "tool_calls":
+                    tool_calls_received = event[1]
+                    stream_usage = event[2]
+                    # Keep the collected text visible if any
+                    if collected_text.strip():
+                        md = Markdown(collected_text)
+                        live.update(Panel(
+                            md,
+                            title=title,
+                            border_style=panel_color,
+                            padding=(1, 2),
+                        ))
+                    break
+                elif event[0] == "done":
+                    collected_text = event[1]
+                    stream_usage = event[2]
+                    # Final render
+                    if collected_text.strip():
+                        md = Markdown(collected_text)
+                        live.update(Panel(
+                            md,
+                            title=title,
+                            border_style=panel_color,
+                            padding=(1, 2),
+                        ))
+                    break
 
-        for tool_call in message.tool_calls:
-            # --- Stop-key check before each tool execution ---
-            if check_stop_key():
-                console.print("[dim]  Thinking interrupted.[/dim]")
-                return "[Interrupted by user]", (turn_input, turn_output)
+        # --- Handle errors ---
+        if error_msg:
+            console.print(f"[bold red]{error_msg}[/bold red]")
+            return None, None, tool_count
 
-            result_json = handle_tool_call(tool_call, conversation_history)
-            result_data = json.loads(result_json)
-            payload.append(
-                {
+        # --- Track token usage ---
+        session.add_tokens(stream_usage["input"], stream_usage["output"])
+        turn_input += stream_usage["input"]
+        turn_output += stream_usage["output"]
+
+        # --- Tool execution phase ---
+        if tool_calls_received:
+            tool_count += len(tool_calls_received)
+
+            # Build assistant message with tool calls
+            assistant_msg = {
+                "role": "assistant",
+                "content": collected_text or "",
+                "tool_calls": tool_calls_received,
+            }
+            payload.append(assistant_msg)
+
+            for tc in tool_calls_received:
+                if check_stop_key():
+                    return "[Interrupted by user]", (turn_input, turn_output), tool_count
+
+                # Show status during non-interactive tool execution
+                name = tc["function"]["name"]
+                args = json.loads(tc["function"]["arguments"])
+                tc_id = tc["id"]
+
+                if name == "run_command":
+                    # Shell commands need user confirmation first (no status)
+                    cmd = args["cmd"]
+                    choice = confirm_command(cmd)
+                    if isinstance(choice, tuple) and choice[0] == "e":
+                        cmd = choice[1]
+                        choice = confirm_command(cmd)
+                    if choice == "n":
+                        result = "User declined to run the command."
+                        session.record("run_command", cmd, error=False)
+                    else:
+                        tool_start = time.time()
+                        spinner_text = _next_spinner_text()
+                        with console.status(
+                            f"[bold cyan]{spinner_text}[/bold cyan]",
+                            spinner="dots",
+                        ):
+                            show_action("Running", cmd)
+                            result = run_command(cmd)
+                            show_result(result)
+                            elapsed = time.time() - tool_start
+                            if elapsed > 2:
+                                console.print(f"[dim]  Took {elapsed:.1f}s[/dim]")
+                        is_error = result.startswith("ERROR:")
+                        session.record("run_command", cmd, error=is_error)
+                        # Ring bell after long shell commands
+                        if elapsed > 2:
+                            _ring_bell()
+                else:
+                    # File / directory tools — brief status
+                    tool_start = time.time()
+                    spinner_text = _next_spinner_text()
+                    with console.status(
+                        f"[bold cyan]{spinner_text}[/bold cyan]",
+                        spinner="dots",
+                    ):
+                        if name == "read_file":
+                            show_action("Reading", args["path"])
+                            result = read_file(args["path"])
+                            session.record("read_file", args["path"])
+                        elif name == "write_file":
+                            show_action("Writing", args["path"])
+                            diff = write_file(args["path"], args["content"])
+                            show_diff(diff)
+                            result = f"File written: {args['path']}"
+                            session.record("write_file", args["path"])
+                        elif name == "list_directory":
+                            path = args.get("path", ".")
+                            show_action("Listing", path)
+                            data = list_directory(path)
+                            result = json.dumps(data)
+                            session.record("list_directory", path)
+                        else:
+                            result = f"Unknown tool: {name}"
+                        elapsed = time.time() - tool_start
+                        if elapsed > 2:
+                            console.print(f"[dim]  Took {elapsed:.1f}s[/dim]")
+                        # Ring bell after long tool executions
+                        if elapsed > 2:
+                            _ring_bell()
+
+                # Append tool result to payload
+                result_data = json.dumps(
+                    {"tool_call_id": tc_id, "name": name, "result": result}
+                )
+                payload.append({
                     "role": "tool",
-                    "tool_call_id": result_data["tool_call_id"],
-                    "content": result_data["result"],
-                }
-            )
+                    "tool_call_id": tc_id,
+                    "content": result_data,
+                })
 
-    return "Reached maximum tool iterations.", (turn_input, turn_output)
+            # Continue loop — model will process tool results
+            continue
+
+        # --- Final text response ---
+        return collected_text, (turn_input, turn_output), tool_count
+
+    return "Reached maximum tool iterations.", (turn_input, turn_output), tool_count
 
 
+# ---------------------------------------------------------------------------
+# Token bar (Phase 4 — colour-coded by usage)
+# ---------------------------------------------------------------------------
 def _build_token_bar(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
     """Return a 10-character progress bar showing context usage."""
     fill = min(total_tokens / max_tokens, 1.0)
@@ -333,14 +580,35 @@ def _build_token_bar(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) ->
     return "█" * filled_blocks + "░" * (10 - filled_blocks)
 
 
+def _token_bar_style(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
+    """Return a Rich style string for the token bar based on usage percentage."""
+    pct = min(total_tokens / max_tokens * 100, 100)
+    if pct < 10:
+        return "dim"  # Hide when nearly empty
+    elif pct < 30:
+        return "green"
+    elif pct < 60:
+        return "bright_yellow"
+    elif pct < 85:
+        return "orange1"
+    else:
+        return "bold bright_red"
+
+
 def show_token_line(turn_input: int, turn_output: int):
     turn_total = turn_input + turn_output
     totals = session.get_token_totals()
-    bar = _build_token_bar(totals["total"])
     pct = min(totals["total"] / MAX_CONTEXT_TOKENS * 100, 100)
+    style = _token_bar_style(totals["total"])
+
+    # Skip rendering if usage is below 10% and turns are below 3 (Phase 4.2)
+    if pct < 10 and totals["turns"] < 3:
+        return
+
+    bar = _build_token_bar(totals["total"])
     console.print(
-        f"[dim]  [{bar}] {pct:>3.0f}%  {totals['total']:>6,} / {MAX_CONTEXT_TOKENS:,} tokens  "
-        f"({totals['turns']} turn{'s' if totals['turns'] != 1 else ''})[/dim]"
+        f"[{style}]  [{bar}] {pct:>3.0f}%  {totals['total']:>6,} / {MAX_CONTEXT_TOKENS:,} tokens  "
+        f"({totals['turns']} turn{'s' if totals['turns'] != 1 else ''})[/{style}]"
     )
     if totals["total"] > CONTEXT_WARNING_THRESHOLD:
         console.print(
@@ -348,6 +616,9 @@ def show_token_line(turn_input: int, turn_output: int):
         )
 
 
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
 def _slash_command_table() -> Table:
     """Return the Rich Table listing all slash commands."""
     table = Table(title="Slash Commands", title_style="bold cyan", box=None)
@@ -410,14 +681,15 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
 
     if command == "/tokens":
         totals = session.get_token_totals()
-        bar = _build_token_bar(totals["total"])
         pct = min(totals["total"] / MAX_CONTEXT_TOKENS * 100, 100)
+        style = _token_bar_style(totals["total"])
+        bar = _build_token_bar(totals["total"])
         console.print(f"[bold]Token Usage[/bold]")
         console.print(f"  [dim]Turns:   [/dim]{totals['turns']}")
         console.print(f"  [dim]Input:   [/dim]{totals['input']:>6,}")
         console.print(f"  [dim]Output:  [/dim]{totals['output']:>6,}")
         console.print(f"  [dim]Total:   [/dim]{totals['total']:>6,}")
-        console.print(f"  [dim]Context: [/dim][{bar}] {pct:.0f}%  ({totals['total']:,} / {MAX_CONTEXT_TOKENS:,})")
+        console.print(f"  [dim]Context: [/dim][{style}][{bar}] {pct:.0f}%  ({totals['total']:,} / {MAX_CONTEXT_TOKENS:,})[/{style}]")
         return True
 
     if command == "/save":
@@ -478,6 +750,16 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
             console.print(f"[yellow]Unknown model: {choice}. Use 'pro' or 'flash'.[/yellow]")
         return True
 
+    if command == "/bell":
+        global _BELL_ENABLED
+        _BELL_ENABLED = not _BELL_ENABLED
+        status = "ON" if _BELL_ENABLED else "OFF"
+        console.print(f"[dim]Completion bell: [bold]{status}[/bold][/dim]")
+        if _BELL_ENABLED:
+            # Ring once as confirmation of the toggle
+            _ring_bell()
+        return True
+
     # Unknown slash command — let it pass through to the AI
     return False
 
@@ -516,9 +798,16 @@ def main():
     header_content = get_header_text()
 
     if session_files:
+        # Build session list with metadata (Phase 6.1)
         sessions_text = ""
         for sf in session_files[:10]:
-            sessions_text += f"{sf}\n"
+            filepath = os.path.join(SESSION_DIR, sf)
+            meta = _parse_session_metadata(filepath)
+            rel_time = _relative_time(meta["timestamp"])
+            sessions_text += (
+                f"[bold]{sf}[/bold]"
+                f"  [dim]{meta['turns']} turns   {meta['model']}   {rel_time}[/dim]\n"
+            )
 
         sessions_panel = Panel(
             sessions_text.rstrip(),
@@ -562,10 +851,15 @@ def main():
     set_model(model_key)
     console.print(f"[dim]Model: deepseek-v4-{model_name.lower()}[/dim]")
 
+    # --- Show bell status at startup if enabled ---
+    if _BELL_ENABLED:
+        console.print("[dim]Completion bell: ON[/dim]")
+
     tza_style = Style.from_dict(
         {
             "completion-menu.completion": "bg:#0f2b4a fg:#ffffff",
             "completion-menu.completion.current": "bg:#1c86ee fg:#ffffff bold",
+            "prompt-model": "fg:#888888",
         }
     )
 
@@ -574,9 +868,13 @@ def main():
 
     while True:
         pt_color = "dodgerblue" if panel_color == "dodger_blue2" else "gold"
+        model_tag = get_model_display()
         print()
         user_prompt = prompt(
-            HTML(f'<b><style color="{pt_color}">(O__o) You ❯</style></b> '),
+            HTML(
+                f'<style color="#888888">[{model_tag}]</style> '
+                f'<b><style color="{pt_color}">(O__o) You ❯</style></b> '
+            ),
             style=tza_style,
             completer=slash_completer,
         )
@@ -613,7 +911,7 @@ def main():
         payload, tools = build_payload(conversation_history)
 
         start = time.time()
-        response, turn_usage = agent_loop(
+        response, turn_usage, tool_count = agent_loop(
             conversation_history, payload, tools, panel_color
         )
         elapsed = time.time() - start
@@ -624,17 +922,26 @@ def main():
 
         conversation_history.append({"role": "assistant", "content": response})
 
+        # --- Response panel with varied subtitle (Phase 7.1) ---
+        subtitle_parts = [f"[dim]{elapsed:.2f}s[/dim]"]
+        if tool_count > 0:
+            subtitle_parts.append(f"[dim]{tool_count} tool{'s' if tool_count != 1 else ''} used[/dim]")
+        subtitle = " — ".join(subtitle_parts)
+
         rendered_markdown = Markdown(response)
         panel = Panel(
             rendered_markdown,
             title=f"[bold {panel_color}] TzakGPT (via DeepSeek)[/bold {panel_color}]",
-            subtitle=f"[dim]{elapsed:.2f}s[/dim]",
+            subtitle=subtitle,
             border_style=panel_color,
             padding=(1, 2),
         )
         console.print(panel)
         if turn_usage:
             show_token_line(turn_usage[0], turn_usage[1])
+
+        # --- Ring bell on response completion (Phase 9.1) ---
+        _ring_bell()
 
 
 if __name__ == "__main__":
