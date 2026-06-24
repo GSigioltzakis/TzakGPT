@@ -873,7 +873,7 @@ def main():
         user_prompt = prompt(
             HTML(
                 f'<style color="#888888">[{model_tag}]</style> '
-                f'<b><style color="{pt_color}">(O__o) You ❯</style></b> '
+                f'<b><style color="{pt_color}">You ❯</style></b> '
             ),
             style=tza_style,
             completer=slash_completer,
