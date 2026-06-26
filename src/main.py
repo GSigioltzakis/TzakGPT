@@ -26,25 +26,20 @@ from prompt_toolkit.completion import Completer, Completion
 
 import session
 
-# ---------------------------------------------------------------------------
-# Non-blocking stop-key check (Windows only)
-# ---------------------------------------------------------------------------
 try:
     import msvcrt
 
     def check_stop_key() -> bool:
-        """Return True if the user pressed X (case-insensitive) to interrupt thinking."""
+        """Return True if the user pressed X to interrupt thinking."""
         while msvcrt.kbhit():
             key = msvcrt.getch().lower()
             if key == b"x":
-                # Consume any leftover buffered keystrokes from the same burst
                 while msvcrt.kbhit():
                     msvcrt.getch()
                 return True
         return False
 
 except ImportError:
-    # Non-Windows fallback — stop key not supported
     def check_stop_key() -> bool:
         return False
 
@@ -53,12 +48,9 @@ console = Console()
 
 SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
-CONTEXT_WARNING_THRESHOLD = 300000
-MAX_CONTEXT_TOKENS = 600000
+CONTEXT_WARNING_THRESHOLD = 1_500_000
+MAX_CONTEXT_TOKENS = 3_000_000
 
-# ---------------------------------------------------------------------------
-# Completion bell (Phase 9.1) — off by default, togglable via /bell or env var
-# ---------------------------------------------------------------------------
 _BELL_ENABLED = os.getenv("TZAK_BELL", "").strip().lower() in ("true", "1", "yes")
 
 
@@ -69,9 +61,6 @@ def _ring_bell():
         sys.stdout.flush()
 
 
-# ---------------------------------------------------------------------------
-# Slash-command definitions (single source of truth)
-# ---------------------------------------------------------------------------
 SLASH_COMMANDS = {
     "/help":   "Show this help message",
     "/clear":  "Reset conversation history (with confirmation)",
@@ -83,9 +72,7 @@ SLASH_COMMANDS = {
     "/bell":   "Toggle completion bell on / off",
 }
 
-# ---------------------------------------------------------------------------
-# Spinner text pool — cycled during tool execution pauses and thinking phase
-# ---------------------------------------------------------------------------
+
 _SPINNER_TEXTS = [
     "Thinking...\n",
     "Reading your files...\n",
@@ -103,46 +90,34 @@ def _next_spinner_text() -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
-# Cyclable Spinner renderable — wraps Rich Spinner with rotating text
-# ---------------------------------------------------------------------------
 class _CyclingSpinner:
-    """A renderable that shows a spinner with text that cycles from the pool.
+    """A renderable that cycles spinner text from the pool as it animates."""
 
-    Each time Rich renders this (via Live's refresh loop), the spinner frame
-    advances and — after a full rotation — the text rotates to the next phrase.
-    """
     def __init__(self, spinner_name: str = "dots"):
         self._spinner = Spinner(spinner_name, text="")
         self._text_idx = 0
         self._texts = _SPINNER_TEXTS
         self._frame_count = 0
-        self._frames_per_text = 40  # roughly 2.7 seconds at 15 fps
+        self._frames_per_text = 40
 
     def __rich_console__(self, console, options):
-        # Advance frame and possibly rotate text
         self._frame_count += 1
         if self._frame_count >= self._frames_per_text:
             self._frame_count = 0
             self._text_idx = (self._text_idx + 1) % len(self._texts)
-        # Use Text.from_markup as class method — self._spinner._text may be a
-        # plain str (no .from_markup), but Text.from_markup always works.
         self._spinner._text = Text.from_markup(
             f"[dim]{self._texts[self._text_idx]}[/dim]"
         )
         yield from self._spinner.__rich_console__(console, options)
 
 
-# ---------------------------------------------------------------------------
-# Custom completer — ONLY pops up when input starts with "/"
-# ---------------------------------------------------------------------------
 class SlashCompleter(Completer):
+    """Prompt-toolkit completer that activates only when input starts with '/'."""
+
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor
-        # Only activate when the input starts with a slash
         if not text.startswith("/"):
             return
-        # Show all slash commands that match what's been typed so far
         for cmd, desc in SLASH_COMMANDS.items():
             if cmd.startswith(text):
                 yield Completion(
@@ -156,10 +131,10 @@ def get_header_text() -> str:
     logo = r"""
 ████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ██████╗ ████████╗
 ╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ██╔══██╗╚══██╔══╝
-   ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝   ██║   
-   ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝    ██║   
-   ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║        ██║   
-   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚══════╝╚═╝        ╚═╝   
+   ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝   ██║
+   ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝    ██║
+   ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║        ██║
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝        ╚═╝
     """
     greeting = random.choice(GREETINGS)
     return (
@@ -171,7 +146,7 @@ def get_header_text() -> str:
 
 
 def _next_sequential_name() -> str:
-    """Scan SESSION_DIR for session_NNN.json files and return the next name."""
+    """Return the next session_NNN.json filename by scanning existing saves."""
     os.makedirs(SESSION_DIR, exist_ok=True)
     highest = 0
     for f in os.listdir(SESSION_DIR):
@@ -186,7 +161,7 @@ def _next_sequential_name() -> str:
 
 
 def _unique_path(filename: str) -> str:
-    """Return a unique save path.  Auto-increments a counter if the file exists."""
+    """Return a unique save path, auto-incrementing a counter if the file exists."""
     base, ext = os.path.splitext(filename)
     if ext != ".json":
         ext = ".json"
@@ -223,11 +198,8 @@ def save_session(conversation_history, filename=None):
     return True
 
 
-# ---------------------------------------------------------------------------
-# Session metadata helpers (Phase 6.1)
-# ---------------------------------------------------------------------------
 def _relative_time(ts_str: str) -> str:
-    """Return a human-friendly relative time string from an ISO timestamp."""
+    """Return a human-friendly relative time from an ISO timestamp."""
     try:
         dt = datetime.fromisoformat(ts_str)
         diff = datetime.now() - dt
@@ -250,7 +222,6 @@ def _parse_session_metadata(filepath: str) -> dict:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         turns = data.get("token_totals", {}).get("turns", 0)
-        # Determine model from session log
         model = "flash"
         for entry in data.get("session_log", []):
             if entry.get("action") == "model_change":
@@ -323,7 +294,7 @@ def load_session(conversation_history, filename=None):
 
 
 def handle_tool_call(tool_call, conversation_history) -> str:
-    """Execute a single tool call. Returns JSON result string for the API."""
+    """Execute a single tool call and return the JSON result string for the API."""
     name = tool_call.function.name
     args = json.loads(tool_call.function.arguments)
 
@@ -345,7 +316,6 @@ def handle_tool_call(tool_call, conversation_history) -> str:
         session.record("list_directory", path)
     elif name == "run_command":
         cmd = args["cmd"]
-        # Confirm BEFORE entering any status display (user needs to interact)
         choice = confirm_command(cmd)
         if isinstance(choice, tuple) and choice[0] == "e":
             cmd = choice[1]
@@ -367,23 +337,18 @@ def handle_tool_call(tool_call, conversation_history) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Streaming agent loop (Phases 2 & 3)
-# ---------------------------------------------------------------------------
 def agent_loop(conversation_history, payload, tools, panel_color):
-    """Chat loop with streaming responses. Returns (response_text, usage_tuple, tool_count)."""
+    """Streaming chat loop. Returns (response_text, usage_tuple, tool_count)."""
     max_iterations = 100
     iteration = 0
     turn_input = 0
     turn_output = 0
     tool_count = 0
 
-    # Repeat-detection state
     prev_tool_signature = None
     repeat_count = 0
 
     while iteration < max_iterations:
-        # --- Stop-key check before each API call ---
         if check_stop_key():
             console.print("[dim]  Interrupted.[/dim]")
             return "[Interrupted by user]", (turn_input, turn_output), tool_count
@@ -398,13 +363,7 @@ def agent_loop(conversation_history, payload, tools, panel_color):
 
         title = f"[bold {panel_color}] TzakGPT (via DeepSeek)[/bold {panel_color}]"
 
-        # --- Streaming display with Live panel ---
-        # transient=True: streaming preview vanishes after loop exits,
-        # so only the final polished panel from main() stays visible.
         with Live(console=console, refresh_per_second=15, transient=True) as live:
-            # Show animated spinner + cycling text while waiting for the first
-            # token.  A short sleep gives the spinner a render frame before the
-            # stream iterator blocks on the network, so it "lands" visually.
             thinking_spinner = _CyclingSpinner("dots")
             live.update(Panel(
                 thinking_spinner,
@@ -415,7 +374,6 @@ def agent_loop(conversation_history, payload, tools, panel_color):
             time.sleep(0.15)
 
             for event in stream:
-                # Stop-key check between chunks
                 if check_stop_key():
                     live.update(Panel(
                         "[dim]Interrupted.[/dim]",
@@ -439,7 +397,6 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                 elif event[0] == "tool_calls":
                     tool_calls_received = event[1]
                     stream_usage = event[2]
-                    # Keep the collected text visible if any
                     if collected_text.strip():
                         md = Markdown(collected_text)
                         live.update(Panel(
@@ -452,7 +409,6 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                 elif event[0] == "done":
                     collected_text = event[1]
                     stream_usage = event[2]
-                    # Final render
                     if collected_text.strip():
                         md = Markdown(collected_text)
                         live.update(Panel(
@@ -463,21 +419,17 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                         ))
                     break
 
-        # --- Handle errors ---
         if error_msg:
             console.print(f"[bold red]{error_msg}[/bold red]")
             return None, None, tool_count
 
-        # --- Track token usage ---
         session.add_tokens(stream_usage["input"], stream_usage["output"])
         turn_input += stream_usage["input"]
         turn_output += stream_usage["output"]
 
-        # --- Tool execution phase ---
         if tool_calls_received:
             tool_count += len(tool_calls_received)
 
-            # --- Repeat-detection: check if tool calls match previous iteration ---
             current_signature = json.dumps(
                 [{"name": tc["function"]["name"], "args": tc["function"]["arguments"]}
                  for tc in tool_calls_received],
@@ -492,7 +444,6 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                 repeat_count = 0
                 prev_tool_signature = current_signature
 
-            # Build assistant message with tool calls
             assistant_msg = {
                 "role": "assistant",
                 "content": collected_text or "",
@@ -504,13 +455,11 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                 if check_stop_key():
                     return "[Interrupted by user]", (turn_input, turn_output), tool_count
 
-                # Show status during non-interactive tool execution
                 name = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"])
                 tc_id = tc["id"]
 
                 if name == "run_command":
-                    # Shell commands need user confirmation first (no status)
                     cmd = args["cmd"]
                     choice = confirm_command(cmd)
                     if isinstance(choice, tuple) and choice[0] == "e":
@@ -534,11 +483,9 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                                 console.print(f"[dim]  Took {elapsed:.1f}s[/dim]")
                         is_error = result.startswith("ERROR:")
                         session.record("run_command", cmd, error=is_error)
-                        # Ring bell after long shell commands
                         if elapsed > 2:
                             _ring_bell()
                 else:
-                    # File / directory tools — brief status
                     tool_start = time.time()
                     spinner_text = _next_spinner_text()
                     with console.status(
@@ -566,11 +513,9 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                         elapsed = time.time() - tool_start
                         if elapsed > 2:
                             console.print(f"[dim]  Took {elapsed:.1f}s[/dim]")
-                        # Ring bell after long tool executions
                         if elapsed > 2:
                             _ring_bell()
 
-                # Append tool result to payload
                 result_data = json.dumps(
                     {"tool_call_id": tc_id, "name": name, "result": result}
                 )
@@ -580,30 +525,25 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                     "content": result_data,
                 })
 
-            # Continue loop — model will process tool results
             continue
 
-        # --- Final text response ---
         return collected_text, (turn_input, turn_output), tool_count
 
     return "Reached maximum tool iterations.", (turn_input, turn_output), tool_count
 
 
-# ---------------------------------------------------------------------------
-# Token bar (Phase 4 — colour-coded by usage)
-# ---------------------------------------------------------------------------
 def _build_token_bar(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
     """Return a 10-character progress bar showing context usage."""
     fill = min(total_tokens / max_tokens, 1.0)
     filled_blocks = int(fill * 10)
-    return "█" * filled_blocks + "░" * (10 - filled_blocks)
+    return "\u2588" * filled_blocks + "\u2591" * (10 - filled_blocks)
 
 
 def _token_bar_style(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
     """Return a Rich style string for the token bar based on usage percentage."""
     pct = min(total_tokens / max_tokens * 100, 100)
     if pct < 10:
-        return "dim"  # Hide when nearly empty
+        return "dim"
     elif pct < 30:
         return "green"
     elif pct < 60:
@@ -620,7 +560,6 @@ def show_token_line(turn_input: int, turn_output: int):
     pct = min(totals["total"] / MAX_CONTEXT_TOKENS * 100, 100)
     style = _token_bar_style(totals["total"])
 
-    # Skip rendering if usage is below 10% and turns are below 3 (Phase 4.2)
     if pct < 10 and totals["turns"] < 3:
         return
 
@@ -635,11 +574,8 @@ def show_token_line(turn_input: int, turn_output: int):
         )
 
 
-# ---------------------------------------------------------------------------
-# Slash commands
-# ---------------------------------------------------------------------------
 def _slash_command_table() -> Table:
-    """Return the Rich Table listing all slash commands."""
+    """Return a Rich Table listing all slash commands."""
     table = Table(title="Slash Commands", title_style="bold cyan", box=None)
     table.add_column("Command", style="bold dodger_blue2", width=10)
     table.add_column("Description", style="dim")
@@ -649,13 +585,12 @@ def _slash_command_table() -> Table:
 
 
 def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bool:
-    """Return True if the input was consumed as a slash command; False to pass through to AI."""
+    """Handle a slash command. Returns True if consumed, False to pass through to AI."""
     stripped = cmd_line.strip()
     parts = stripped.split()
     command = parts[0].lower() if parts else ""
     arg = " ".join(parts[1:]) if len(parts) > 1 else ""
 
-    # "/" alone — show help table
     if stripped == "/":
         console.print(_slash_command_table())
         return True
@@ -673,7 +608,6 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
             return True
         conversation_history.clear()
         console.print("[dim]History cleared.[/dim]")
-        # Offer to also delete the most recent saved session file
         os.makedirs(SESSION_DIR, exist_ok=True)
         existing = sorted(
             [f for f in os.listdir(SESSION_DIR) if f.endswith(".json")],
@@ -734,7 +668,6 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
     if command == "/model":
         choice = arg.strip().lower() if arg else ""
         if not choice:
-            # Prompt interactively
             console.print(
                 "[bold]Switch model:[/bold] [bold dodger_blue2][F][/bold dodger_blue2]lash or "
                 "[bold dodger_blue2][P][/bold dodger_blue2]ro? [dim](Esc to cancel, Enter default Flash)[/dim] ",
@@ -775,11 +708,9 @@ def handle_slash_command(cmd_line: str, conversation_history, panel_color) -> bo
         status = "ON" if _BELL_ENABLED else "OFF"
         console.print(f"[dim]Completion bell: [bold]{status}[/bold][/dim]")
         if _BELL_ENABLED:
-            # Ring once as confirmation of the toggle
             _ring_bell()
         return True
 
-    # Unknown slash command — let it pass through to the AI
     return False
 
 
@@ -817,7 +748,6 @@ def main():
     header_content = get_header_text()
 
     if session_files:
-        # Build session list with metadata (Phase 6.1)
         sessions_text = ""
         for sf in session_files[:10]:
             filepath = os.path.join(SESSION_DIR, sf)
@@ -865,12 +795,10 @@ def main():
     else:
         console.print(header_content)
 
-    # --- Model selection ---
     model_key, model_name = _choose_model()
     set_model(model_key)
     console.print(f"[dim]Model: deepseek-v4-{model_name.lower()}[/dim]")
 
-    # --- Show bell status at startup if enabled ---
     if _BELL_ENABLED:
         console.print("[dim]Completion bell: ON[/dim]")
 
@@ -882,7 +810,6 @@ def main():
         }
     )
 
-    # The slash completer — only shows the dropdown when input starts with "/"
     slash_completer = SlashCompleter()
 
     while True:
@@ -902,7 +829,6 @@ def main():
             console.print(f"[bold {panel_color}]Ciao![/bold {panel_color}]")
             sys.exit()
 
-        # --- Typing JUST "/" (and nothing else) shows the slash-command table ---
         if user_prompt is not None and user_prompt.strip() == "/":
             console.print(_slash_command_table())
             continue
@@ -911,7 +837,6 @@ def main():
             handled = handle_slash_command(user_prompt, conversation_history, panel_color)
             if handled:
                 continue
-            # If not handled, falls through — send to AI as a normal message
 
         if user_prompt.startswith("!d") or user_prompt.startswith("!f"):
             prefix = user_prompt[:2]
@@ -941,7 +866,6 @@ def main():
 
         conversation_history.append({"role": "assistant", "content": response})
 
-        # --- Response panel with varied subtitle (Phase 7.1) ---
         subtitle_parts = [f"[dim]{elapsed:.2f}s[/dim]"]
         if tool_count > 0:
             subtitle_parts.append(f"[dim]{tool_count} tool{'s' if tool_count != 1 else ''} used[/dim]")
@@ -959,7 +883,6 @@ def main():
         if turn_usage:
             show_token_line(turn_usage[0], turn_usage[1])
 
-        # --- Ring bell on response completion (Phase 9.1) ---
         _ring_bell()
 
 
