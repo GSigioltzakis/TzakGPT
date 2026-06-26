@@ -87,11 +87,11 @@ SLASH_COMMANDS = {
 # Spinner text pool — cycled during tool execution pauses and thinking phase
 # ---------------------------------------------------------------------------
 _SPINNER_TEXTS = [
-    "Thinking...",
-    "Reading your files...",
-    "Consulting DeepSeek...",
-    "Almost done...",
-    "Working on it...",
+    "Thinking...\n",
+    "Reading your files...\n",
+    "Consulting DeepSeek...\n",
+    "Almost done...\n",
+    "Working on it...\n",
 ]
 _spinner_idx = 0
 
@@ -372,11 +372,15 @@ def handle_tool_call(tool_call, conversation_history) -> str:
 # ---------------------------------------------------------------------------
 def agent_loop(conversation_history, payload, tools, panel_color):
     """Chat loop with streaming responses. Returns (response_text, usage_tuple, tool_count)."""
-    max_iterations = 10
+    max_iterations = 100
     iteration = 0
     turn_input = 0
     turn_output = 0
     tool_count = 0
+
+    # Repeat-detection state
+    prev_tool_signature = None
+    repeat_count = 0
 
     while iteration < max_iterations:
         # --- Stop-key check before each API call ---
@@ -472,6 +476,21 @@ def agent_loop(conversation_history, payload, tools, panel_color):
         # --- Tool execution phase ---
         if tool_calls_received:
             tool_count += len(tool_calls_received)
+
+            # --- Repeat-detection: check if tool calls match previous iteration ---
+            current_signature = json.dumps(
+                [{"name": tc["function"]["name"], "args": tc["function"]["arguments"]}
+                 for tc in tool_calls_received],
+                sort_keys=True
+            )
+            if current_signature == prev_tool_signature:
+                repeat_count += 1
+                if repeat_count >= 3:
+                    console.print("[dim]  Repeated same tool calls 3 times — stopping.[/dim]")
+                    return "Reached maximum tool iterations (repeated calls).", (turn_input, turn_output), tool_count
+            else:
+                repeat_count = 0
+                prev_tool_signature = current_signature
 
             # Build assistant message with tool calls
             assistant_msg = {
