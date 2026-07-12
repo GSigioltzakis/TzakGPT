@@ -1,9 +1,37 @@
 /* ==========================================================================
    TzakGPT — Main JavaScript
-   Smooth scrolling, nav highlight, animated counters, staggered reveals.
+   Smooth scrolling, nav highlight, mobile menu, animated reveals.
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', function () {
+
+    /* ---- DOM refs ------------------------------------------------------- */
+    var nav = document.querySelector('.nav');
+    var navToggle = document.querySelector('.nav-toggle');
+    var navLinksAll = document.querySelectorAll('.nav-links a');
+
+    /* ---- Mobile menu toggle --------------------------------------------- */
+    navToggle.addEventListener('click', function () {
+        var isOpen = nav.classList.contains('open');
+        if (isOpen) {
+            nav.classList.remove('open');
+            navToggle.setAttribute('aria-expanded', 'false');
+            document.body.style.overflow = '';
+        } else {
+            nav.classList.add('open');
+            navToggle.setAttribute('aria-expanded', 'true');
+            document.body.style.overflow = 'hidden';
+        }
+    });
+
+    /* Close mobile menu when a nav link is clicked */
+    navLinksAll.forEach(function (link) {
+        link.addEventListener('click', function () {
+            nav.classList.remove('open');
+            navToggle.setAttribute('aria-expanded', 'false');
+            document.body.style.overflow = '';
+        });
+    });
 
     /* ---- Smooth scroll for anchor links --------------------------------- */
     document.querySelectorAll('a[href^="#"]').forEach(function (anchor) {
@@ -18,9 +46,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     /* ---- Scroll-aware navigation highlight + shadow --------------------- */
-    var nav = document.querySelector('.nav');
     var sections = document.querySelectorAll('.section[id]');
-    var navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+    var navSectionLinks = document.querySelectorAll('.nav-links a[href^="#"]');
 
     function updateNavHighlight() {
         var scrollY = window.pageYOffset || document.documentElement.scrollTop;
@@ -40,7 +67,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
-        navLinks.forEach(function (link) {
+        navSectionLinks.forEach(function (link) {
             link.classList.remove('active');
             if (link.getAttribute('href') === '#' + current) {
                 link.classList.add('active');
