@@ -10,15 +10,23 @@ document.addEventListener('DOMContentLoaded', function () {
     var navToggle = document.querySelector('.nav-toggle');
     var navLinksAll = document.querySelectorAll('.nav-links a');
 
+    /* ---- Backdrop overlay for mobile menu ------------------------------- */
+    var backdrop = document.createElement('div');
+    backdrop.className = 'nav-backdrop';
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(backdrop);
+
     /* ---- Mobile menu toggle --------------------------------------------- */
     function openNav() {
         nav.classList.add('open');
+        backdrop.classList.add('visible');
         navToggle.setAttribute('aria-expanded', 'true');
         document.body.style.overflow = 'hidden';
     }
 
     function closeNav() {
         nav.classList.remove('open');
+        backdrop.classList.remove('visible');
         navToggle.setAttribute('aria-expanded', 'false');
         document.body.style.overflow = '';
     }
@@ -38,28 +46,30 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    /* Close mobile menu when tapping the backdrop (dimmed area) */
-    document.addEventListener('click', function (e) {
-        if (!nav.classList.contains('open')) return;
-        // If click is on the nav-links panel itself but NOT on a link/button,
-        // and also not on the toggle, treat as backdrop tap
-        var clickedInsidePanel = nav.querySelector('.nav-links').contains(e.target);
-        var clickedToggle = navToggle.contains(e.target);
-        if (!clickedInsidePanel && !clickedToggle) {
-            closeNav();
-        }
+    /* Close mobile menu when tapping the backdrop */
+    backdrop.addEventListener('click', function () {
+        closeNav();
     });
 
     /* ---- Smooth scroll for anchor links --------------------------------- */
     document.querySelectorAll('a[href^="#"]').forEach(function (anchor) {
         anchor.addEventListener('click', function (e) {
             e.preventDefault();
-            var target = document.querySelector(this.getAttribute('href'));
+            var href = this.getAttribute('href');
+
+            /* Logo / "Top" link — scroll to absolute top */
+            if (href === '#' || href === '') {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                history.pushState(null, null, ' ');
+                return;
+            }
+
+            var target = document.querySelector(href);
             if (target) {
                 var navHeight = nav.offsetHeight;
                 var targetPosition = target.getBoundingClientRect().top + window.pageYOffset - navHeight - 16;
                 window.scrollTo({ top: targetPosition, behavior: 'smooth' });
-                history.pushState(null, null, this.getAttribute('href'));
+                history.pushState(null, null, href);
             }
         });
     });
