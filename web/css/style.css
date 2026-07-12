@@ -60,7 +60,7 @@
     --transition-base: 0.3s ease;
     --transition-slow: 0.5s ease;
 
-    /* ---- Mobile nav ----------------------------------------------- */
+    /* ---- Mobile nav --------------------------------------------------- */
     --nav-height: 56px;
 }
 
@@ -241,6 +241,7 @@ code {
     background: var(--blue-600);
     border-radius: 2px;
     transition: transform var(--transition-base), opacity var(--transition-base);
+    transform-origin: center;
 }
 
 /* Hamburger → X animation */
@@ -504,6 +505,15 @@ code {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     margin-top: 1.5rem;
+    /* Scroll shadow — right-side gradient fades in when content overflows */
+    background:
+        linear-gradient(to right, var(--white) 30%, rgba(255,255,255,0)),
+        linear-gradient(to right, rgba(255,255,255,0), var(--white) 70%) 100% 0,
+        linear-gradient(to right, rgba(28,134,238,0.08), rgba(28,134,238,0)),
+        linear-gradient(to right, rgba(28,134,238,0), rgba(28,134,238,0.08)) 100% 0;
+    background-repeat: no-repeat;
+    background-size: 40px 100%, 40px 100%, 20px 100%, 20px 100%;
+    background-attachment: local, local, scroll, scroll;
 }
 
 /* ---- Tools Table -------------------------------------------------------- */
@@ -880,19 +890,26 @@ code {
    ========================================================================== */
 @media (max-width: 640px) {
     html {
-        font-size: 14px;
+        font-size: 15px;           /* keep base readable — do not shrink */
     }
 
     :root {
-        --nav-height: 52px;
+        --nav-height: 56px;
     }
 
-    /* ---- Container -------------------------------------------------- */
+    /* ---- Safe area support (iPhone notch / Dynamic Island) ---------- */
+    body {
+        padding-top: var(--nav-height);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
     .container {
-        padding: 0 1.2rem;
+        padding: 0 1.25rem;
     }
 
-    /* ---- Navigation (hamburger) ------------------------------------ */
+    /* ==================================================================
+       NAVIGATION — slide-in overlay from right
+       ================================================================== */
     .nav-toggle {
         display: flex;
     }
@@ -900,142 +917,276 @@ code {
     .nav-links {
         position: fixed;
         top: 0;
-        left: 0;
         right: 0;
         bottom: 0;
+        width: 280px;
+        max-width: 85vw;
         flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 1.8rem;
-        background: rgba(255, 255, 255, 0.98);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity var(--transition-base);
-        z-index: 100;
+        align-items: flex-start;
+        justify-content: flex-start;
+        gap: 0;
+        padding: 5rem 2rem 2rem;
+        background: rgba(255, 255, 255, 0.99);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        box-shadow: -8px 0 40px rgba(0, 0, 0, 0.12);
+        transform: translateX(100%);
+        transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
     }
 
     .nav.open .nav-links {
-        opacity: 1;
-        pointer-events: auto;
+        transform: translateX(0);
     }
+
+    /* Backdrop dim behind the slide-in panel */
+    .nav-links::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        left: -100vw;               /* stretch backdrop to cover viewport left of panel */
+        background: rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.35s ease;
+        z-index: -1;
+    }
+    .nav.open .nav-links::before {
+        opacity: 1;
+    }
+
+    .nav-links li {
+        width: 100%;
+        opacity: 0;
+        transform: translateX(20px);
+        transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    .nav.open .nav-links li {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    /* Staggered reveal */
+    .nav.open .nav-links li:nth-child(1) { transition-delay: 0.05s; }
+    .nav.open .nav-links li:nth-child(2) { transition-delay: 0.10s; }
+    .nav.open .nav-links li:nth-child(3) { transition-delay: 0.15s; }
+    .nav.open .nav-links li:nth-child(4) { transition-delay: 0.20s; }
+    .nav.open .nav-links li:nth-child(5) { transition-delay: 0.25s; }
+    .nav.open .nav-links li:nth-child(6) { transition-delay: 0.30s; }
+    .nav.open .nav-links li:nth-child(7) { transition-delay: 0.35s; }
+    .nav.open .nav-links li:nth-child(8) { transition-delay: 0.40s; }
 
     .nav-links a {
-        font-size: 1.1rem;
+        font-size: 1.05rem;
         color: var(--gray-600);
+        display: block;
+        padding: 0.65rem 0;
+        width: 100%;
+        border-bottom: 1px solid var(--gray-100);
     }
-
+    .nav-links a::after {
+        display: none;             /* no underline on mobile nav */
+    }
     .nav-links a.active {
         color: var(--cyan-400);
     }
 
     .nav-github {
-        font-size: 0.95rem !important;
-        padding: 0.5em 1.2em;
+        font-size: 0.9rem !important;
+        padding: 0.55em 1.1em;
         border: 2px solid var(--gray-200);
-        margin-top: 0.4rem;
+        margin-top: 1rem;
+        display: inline-flex;
+        width: auto;
     }
+    .nav-github::after { display: none; }
 
-    /* ---- Hero ------------------------------------------------------ */
+    /* ==================================================================
+       HERO
+       ================================================================== */
     .hero {
-        padding: 4rem 0 2.5rem;
+        padding: 2.5rem 0 3rem;
     }
 
     .hero .container {
         gap: 1.5rem;
     }
 
+    .hero-image {
+        max-width: 100%;
+        order: 0;
+    }
+    .hero-image img {
+        border-radius: var(--radius-md);
+    }
+
+    .hero-text {
+        order: 1;
+    }
+
     .hero-pre {
-        font-size: 0.38rem;
-        padding: 0.6rem;
+        font-size: 0.42rem;
+        padding: 0.7rem;
         line-height: 1.0;
+        overflow-x: auto;
     }
 
     h1 {
-        font-size: 1.55rem;
+        font-size: 1.6rem;
     }
 
     .hero-tagline {
         font-size: 0.95rem;
+        line-height: 1.55;
     }
 
     .hero-buttons {
         flex-direction: column;
         align-items: stretch;
+        gap: 0.6rem;
     }
 
     .btn {
         justify-content: center;
         text-align: center;
-        padding: 0.75rem 1.2rem;
+        padding: 0.8rem 1.2rem;
         font-size: 0.95rem;
+        min-height: 48px;           /* comfortable touch target */
     }
 
-    .hero-image {
-        max-width: 100%;
-    }
-
-    /* ---- Sections -------------------------------------------------- */
+    /* ==================================================================
+       SECTIONS
+       ================================================================== */
     .section {
-        padding: 2rem 0;
+        padding: 2.5rem 0;
     }
 
     h2 {
-        font-size: 1.35rem;
+        font-size: 1.45rem;
     }
 
     h3 {
-        font-size: 1.1rem;
+        font-size: 1.15rem;
     }
 
-    /* ---- Feature grid ---------------------------------------------- */
+    .section-label {
+        font-size: 0.7rem;
+    }
+
+    /* ==================================================================
+       FEATURE GRID — single column, stronger cards
+       ================================================================== */
     .feature-grid {
         grid-template-columns: 1fr;
-        gap: 0.8rem;
+        gap: 0.75rem;
     }
 
     .feature-card {
-        padding: 1.2rem;
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
     }
 
-    /* ---- Code blocks ----------------------------------------------- */
+    .feature-card .icon {
+        width: 44px;
+        height: 44px;
+        font-size: 1.2rem;
+        margin-bottom: 0.6rem;
+    }
+
+    .feature-card h3 {
+        font-size: 1rem;
+    }
+
+    .feature-card p {
+        font-size: 0.88rem;
+    }
+
+    /* ==================================================================
+       TABLES — compact on phone
+       ================================================================== */
+    .table-wrapper {
+        margin-top: 1rem;
+    }
+
+    .tools-table {
+        font-size: 0.78rem;
+        min-width: 440px;
+    }
+
+    .tools-table thead th,
+    .tools-table tbody td {
+        padding: 0.5rem 0.65rem;
+    }
+
+    .tools-table thead th {
+        font-size: 0.7rem;
+    }
+
+    /* ==================================================================
+       COMMAND GRID
+       ================================================================== */
+    .command-grid {
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+    }
+
+    .command-item {
+        padding: 0.75rem 0.9rem;
+        align-items: center;
+    }
+
+    .command-item code {
+        font-size: 0.78rem;
+        padding: 0.3em 0.55em;
+    }
+
+    .command-item span {
+        font-size: 0.85rem;
+    }
+
+    /* ==================================================================
+       CODE BLOCKS
+       ================================================================== */
     .code-block {
         font-size: 0.72rem;
-        padding: 0.9rem;
+        padding: 1rem;
+        border-left-width: 2px;
     }
 
-    /* ---- Step list ------------------------------------------------- */
+    /* ==================================================================
+       STEP LIST — stacked with number on top
+       ================================================================== */
     .step-list li {
         flex-direction: column;
+        gap: 0.5rem;
         padding: 1rem;
     }
 
     .step-list li::before {
-        width: 28px;
-        height: 28px;
+        width: 30px;
+        height: 30px;
         font-size: 0.8rem;
     }
 
     .step-list li div code {
         display: block;
-        margin-top: 0.3rem;
+        margin-top: 0.35rem;
         font-size: 0.75rem;
+        padding: 0.35em 0.5em;
         word-break: break-all;
     }
 
-    /* ---- Tables ---------------------------------------------------- */
-    .tools-table {
-        font-size: 0.8rem;
-        min-width: 420px;
+    /* ==================================================================
+       TWO-COLUMN
+       ================================================================== */
+    .two-col {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
     }
 
-    .tools-table thead th,
-    .tools-table tbody td {
-        padding: 0.5rem 0.7rem;
-    }
-
-    /* ---- Footer ---------------------------------------------------- */
+    /* ==================================================================
+       FOOTER
+       ================================================================== */
     .footer-grid {
         grid-template-columns: 1fr;
         gap: 1.5rem;
@@ -1051,6 +1202,10 @@ code {
     .footer-bottom a {
         margin-left: 0;
     }
+
+    .footer-brand {
+        font-size: 1.2rem;
+    }
 }
 
 
@@ -1058,33 +1213,43 @@ code {
    RESPONSIVE — SMALL PHONES (≤400px)
    ========================================================================== */
 @media (max-width: 400px) {
-    html {
-        font-size: 13px;
-    }
-
     .container {
         padding: 0 1rem;
     }
 
+    .hero {
+        padding: 2rem 0 2.5rem;
+    }
+
     .hero-pre {
-        font-size: 0.3rem;
-        padding: 0.4rem;
+        font-size: 0.35rem;
+        padding: 0.5rem;
     }
 
     h1 {
-        font-size: 1.35rem;
+        font-size: 1.4rem;
     }
 
     .hero-tagline {
-        font-size: 0.88rem;
+        font-size: 0.85rem;
     }
 
     .btn {
         padding: 0.7rem 1rem;
-        font-size: 0.9rem;
+        font-size: 0.88rem;
+        min-height: 44px;
     }
 
-    .nav-brand {
+    .nav-links {
+        width: 100%;
+        max-width: 100vw;
+    }
+
+    h2 {
         font-size: 1.3rem;
+    }
+
+    .section {
+        padding: 2rem 0;
     }
 }
