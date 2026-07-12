@@ -11,26 +11,43 @@ document.addEventListener('DOMContentLoaded', function () {
     var navLinksAll = document.querySelectorAll('.nav-links a');
 
     /* ---- Mobile menu toggle --------------------------------------------- */
+    function openNav() {
+        nav.classList.add('open');
+        navToggle.setAttribute('aria-expanded', 'true');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeNav() {
+        nav.classList.remove('open');
+        navToggle.setAttribute('aria-expanded', 'false');
+        document.body.style.overflow = '';
+    }
+
     navToggle.addEventListener('click', function () {
-        var isOpen = nav.classList.contains('open');
-        if (isOpen) {
-            nav.classList.remove('open');
-            navToggle.setAttribute('aria-expanded', 'false');
-            document.body.style.overflow = '';
+        if (nav.classList.contains('open')) {
+            closeNav();
         } else {
-            nav.classList.add('open');
-            navToggle.setAttribute('aria-expanded', 'true');
-            document.body.style.overflow = 'hidden';
+            openNav();
         }
     });
 
     /* Close mobile menu when a nav link is clicked */
     navLinksAll.forEach(function (link) {
         link.addEventListener('click', function () {
-            nav.classList.remove('open');
-            navToggle.setAttribute('aria-expanded', 'false');
-            document.body.style.overflow = '';
+            closeNav();
         });
+    });
+
+    /* Close mobile menu when tapping the backdrop (dimmed area) */
+    document.addEventListener('click', function (e) {
+        if (!nav.classList.contains('open')) return;
+        // If click is on the nav-links panel itself but NOT on a link/button,
+        // and also not on the toggle, treat as backdrop tap
+        var clickedInsidePanel = nav.querySelector('.nav-links').contains(e.target);
+        var clickedToggle = navToggle.contains(e.target);
+        if (!clickedInsidePanel && !clickedToggle) {
+            closeNav();
+        }
     });
 
     /* ---- Smooth scroll for anchor links --------------------------------- */
@@ -39,7 +56,9 @@ document.addEventListener('DOMContentLoaded', function () {
             e.preventDefault();
             var target = document.querySelector(this.getAttribute('href'));
             if (target) {
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var navHeight = nav.offsetHeight;
+                var targetPosition = target.getBoundingClientRect().top + window.pageYOffset - navHeight - 16;
+                window.scrollTo({ top: targetPosition, behavior: 'smooth' });
                 history.pushState(null, null, this.getAttribute('href'));
             }
         });
@@ -61,7 +80,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var current = '';
         sections.forEach(function (section) {
-            var sectionTop = section.offsetTop - 120;
+            var sectionTop = section.offsetTop - 140;
             if (scrollY >= sectionTop) {
                 current = section.getAttribute('id');
             }
@@ -75,8 +94,35 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    window.addEventListener('scroll', updateNavHighlight);
+    window.addEventListener('scroll', updateNavHighlight, { passive: true });
     updateNavHighlight();
+
+    /* ---- Table scroll shadow — add class when table overflows ----------- */
+    var tableWrappers = document.querySelectorAll('.table-wrapper');
+
+    function updateTableShadows() {
+        tableWrappers.forEach(function (wrapper) {
+            var hasOverflow = wrapper.scrollWidth > wrapper.clientWidth + 2;
+            var isScrolledToEnd = wrapper.scrollLeft + wrapper.clientWidth >= wrapper.scrollWidth - 2;
+            if (hasOverflow && !isScrolledToEnd) {
+                wrapper.classList.add('has-scroll-right');
+            } else {
+                wrapper.classList.remove('has-scroll-right');
+            }
+            if (hasOverflow && wrapper.scrollLeft > 2) {
+                wrapper.classList.add('has-scroll-left');
+            } else {
+                wrapper.classList.remove('has-scroll-left');
+            }
+        });
+    }
+
+    tableWrappers.forEach(function (wrapper) {
+        wrapper.addEventListener('scroll', updateTableShadows, { passive: true });
+    });
+
+    window.addEventListener('resize', updateTableShadows, { passive: true });
+    updateTableShadows();
 
     /* ---- Animated stat counters ----------------------------------------- */
     function animateCounters() {
