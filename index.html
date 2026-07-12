@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TzakGPT — Local AI Agent CLI</title>
+    <meta name="description" content="TzakGPT is an open-source, terminal-based AI assistant powered by DeepSeek. Streams responses, edits code with diffs, runs shell commands, and remembers your sessions.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- ==================================================================
+         NAVIGATION
+         ================================================================== -->
+    <nav class="nav">
+        <div class="container">
+            <a href="#" class="nav-brand">TzakGPT</a>
+            <ul class="nav-links">
+                <li><a href="#overview">Overview</a></li>
+                <li><a href="#architecture">Architecture</a></li>
+                <li><a href="#tools">Tools</a></li>
+                <li><a href="#commands">Commands</a></li>
+                <li><a href="#memory">Memory</a></li>
+                <li><a href="#sessions">Sessions</a></li>
+                <li><a href="#setup">Setup</a></li>
+                <li><a href="https://github.com/GSigioltzakis/TzakGPT" class="nav-github" target="_blank" rel="noopener" title="View source on GitHub">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: -3px; margin-right: 4px;">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    GitHub
+                </a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-text">
+                <pre class="hero-pre">
+████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ██████╗ ████████╗
+╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ██╔══██╗╚══██╔══╝
+   ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝   ██║
+   ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝    ██║
+   ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║        ██║
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝        ╚═╝
+                </pre>
+                <h1>Local AI Agent CLI. Intelligent. Transparent.</h1>
+                <p class="hero-tagline">TzakGPT is an open-source, terminal-based AI assistant powered by DeepSeek. It streams responses, reads and edits files with visual diffs, runs shell commands safely, and remembers every session — all running locally on your machine.</p>
+                <div class="hero-buttons">
+                    <a href="#setup" class="btn btn-primary">Get Started</a>
+                    <a href="#architecture" class="btn btn-outline">How It Works</a>
+                    <a href="https://github.com/GSigioltzakis/TzakGPT" class="btn btn-github" target="_blank" rel="noopener">
+                        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                        </svg>
+                        View on GitHub
+                    </a>
+                </div>
+            </div>
+            <div class="hero-image">
+                <img src="assets/image.png" alt="TzakGPT terminal screenshot showing the CLI interface with streaming responses, tool calls, and visual diffs">
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         OVERVIEW
+         ================================================================== -->
+    <section class="section" id="overview">
+        <div class="container">
+            <span class="section-label">Overview</span>
+            <h2>What is TzakGPT?</h2>
+            <p>A local CLI coding assistant powered by DeepSeek. It operates directly on your file system — your code never leaves your machine. Responses stream token-by-token, file writes produce color-coded diffs, and every shell command requires confirmation. Press <strong>X</strong> to interrupt mid-response.</p>
+
+            <!-- Feature Grid -->
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="icon">ST</div>
+                    <h3>Streaming with Interrupt</h3>
+                    <p>Responses stream token-by-token into a live-updating panel. Press X at any time to interrupt — useful when the model heads down the wrong path.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">DF</div>
+                    <h3>Visual Diffs on Edit</h3>
+                    <p>Every file write outputs a color-coded, line-numbered diff so you can verify exactly what changed before moving on.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">MS</div>
+                    <h3>Model Switching</h3>
+                    <p>Choose between Flash (fast, default) and Pro (more capable) at startup or anytime via /model. The active model is shown in every prompt.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">SH</div>
+                    <h3>Safe Shell Execution</h3>
+                    <p>Shell commands pause the loop and require explicit confirmation before running. Status spinners show progress on non-interactive calls.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">SW</div>
+                    <h3>Sliding Window Memory</h3>
+                    <p>After 6 turns, older context is automatically summarized while recent messages stay intact — preventing token bloat during long sessions.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">SN</div>
+                    <h3>Named Session Persistence</h3>
+                    <p>Sessions auto-save as JSON files with collision-resistant naming. Resume any session from the startup menu, with up to 30 stored.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         ARCHITECTURE
+         ================================================================== -->
+    <section class="section" id="architecture" style="background: var(--off-white);">
+        <div class="container">
+            <span class="section-label">Architecture</span>
+            <h2>How TzakGPT Works</h2>
+            <p>The agent follows a structured loop: user input is processed with auto-completion, a payload of system instructions and conversation history is assembled, DeepSeek streams the response token-by-token, and tool calls execute locally with error handling.</p>
+
+            <!-- Project table -->
+            <h3>Module Map</h3>
+            <table class="tools-table">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>src/main.py</code></td>
+                        <td>UI loop, agent orchestration, slash commands, streaming display, model selection.</td>
+                    </tr>
+                    <tr>
+                        <td><code>src/clients.py</code></td>
+                        <td>DeepSeek API integration via OpenAI client — handles both streaming and non-streaming calls.</td>
+                    </tr>
+                    <tr>
+                        <td><code>src/soul.py</code></td>
+                        <td>System prompt, tool schemas, sliding window logic, greeting pool.</td>
+                    </tr>
+                    <tr>
+                        <td><code>src/tools.py</code></td>
+                        <td>Implements the four local tools: file read, file write with diffs, directory listing, and secure shell execution.</td>
+                    </tr>
+                    <tr>
+                        <td><code>src/session.py</code></td>
+                        <td>Telemetry, action logging, token counting, and session persistence/restore.</td>
+                    </tr>
+                    <tr>
+                        <td><code>src/display.py</code></td>
+                        <td>TUI components: visual diffs, action labels, command confirmation prompts.</td>
+                    </tr>
+                    <tr>
+                        <td><code>web/</code></td>
+                        <td>This documentation site — HTML, CSS, and JavaScript.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- Narration & Self-Verification -->
+            <h3 style="margin-top: 2rem;">Context-Aware Operation</h3>
+            <p>Every prompt includes your <strong>current working directory</strong> and a <strong>summary of recent actions</strong>. Combined with the self-verification protocol (read-back after every write), the agent never operates blind.</p>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         TOOLS
+         ================================================================== -->
+    <section class="section" id="tools">
+        <div class="container">
+            <span class="section-label">Tools</span>
+            <h2>Built-in Tools</h2>
+            <p>All four tools use the OpenAI-compatible function-calling schema with comprehensive error handling. Available in every conversation turn.</p>
+
+            <table class="tools-table">
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Parameters</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>read_file</code></td>
+                        <td><code>path</code> (string, required)</td>
+                        <td>Reads the full contents of any file. Used before every edit to ensure the latest state is known.</td>
+                    </tr>
+                    <tr>
+                        <td><code>write_file</code></td>
+                        <td><code>path</code> (string), <code>content</code> (string)</td>
+                        <td>Writes or overwrites a file. After writing, TzakGPT reads it back and displays a color-coded diff.</td>
+                    </tr>
+                    <tr>
+                        <td><code>run_command</code></td>
+                        <td><code>cmd</code> (string, required)</td>
+                        <td>Executes a shell command. The loop pauses for explicit confirmation before proceeding.</td>
+                    </tr>
+                    <tr>
+                        <td><code>list_directory</code></td>
+                        <td><code>path</code> (string, optional)</td>
+                        <td>Lists files and subdirectories. Defaults to the current working directory.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="feature-grid" style="grid-template-columns: 1fr 1fr; margin-top: 1.5rem;">
+                <div class="feature-card">
+                    <div class="icon">CF</div>
+                    <h3>Shell Confirmation</h3>
+                    <p>Every shell command requires explicit approval before execution. The agent never runs system commands autonomously.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">SX</div>
+                    <h3>Stream Interruption</h3>
+                    <p>Press X at any time during thinking or tool execution to halt the model instantly. Control returns to the prompt immediately.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         COMMANDS
+         ================================================================== -->
+    <section class="section" id="commands" style="background: var(--off-white);">
+        <div class="container">
+            <span class="section-label">Commands</span>
+            <h2>Slash Commands</h2>
+            <p>Typing <code>/</code> opens an auto-completing dropdown for session management. All commands are available at any point during a conversation.</p>
+
+            <div class="command-grid">
+                <div class="command-item">
+                    <code>/help</code>
+                    <span>Show the full list of available commands.</span>
+                </div>
+                <div class="command-item">
+                    <code>/clear</code>
+                    <span>Reset conversation history (with confirmation).</span>
+                </div>
+                <div class="command-item">
+                    <code>/status</code>
+                    <span>Display the session activity log.</span>
+                </div>
+                <div class="command-item">
+                    <code>/tokens</code>
+                    <span>Show token usage statistics.</span>
+                </div>
+                <div class="command-item">
+                    <code>/save [name]</code>
+                    <span>Save a named session checkpoint.</span>
+                </div>
+                <div class="command-item">
+                    <code>/load [name]</code>
+                    <span>Load a saved session by name.</span>
+                </div>
+                <div class="command-item">
+                    <code>/model [pro|flash]</code>
+                    <span>Switch between Flash and Pro on the fly.</span>
+                </div>
+                <div class="command-item">
+                    <code>/bell</code>
+                    <span>Toggle the terminal bell on response completion.</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         MEMORY
+         ================================================================== -->
+    <section class="section" id="memory">
+        <div class="container">
+            <span class="section-label">Memory Management</span>
+            <h2>Sliding Window Context</h2>
+            <p>After 6 turns, a sliding window algorithm automatically summarizes older context while keeping recent messages intact — preventing token bloat without losing the conversation thread.</p>
+
+            <div class="two-col">
+                <div>
+                    <h3>How It Works</h3>
+                    <p>The sliding window preserves the <strong>system prompt</strong> at the top and the most recent turns at the bottom. Older messages in the middle are compressed into a compact summary block, reducing token usage while maintaining context.</p>
+                    <p>A <strong>color-coded token bar</strong> is displayed below every response so you always know how close you are to the context limit.</p>
+                </div>
+                <div>
+                    <div class="code-block">
+<span class="prompt"># Sliding window — triggers after 6 turns</span>
+<span class="cmd">def</span> compact(messages, max_tokens):
+    system  = messages[<span class="cmd">0</span>]          <span class="out"># preserve system prompt</span>
+    tail    = messages[-keep_n:]    <span class="out"># preserve recent N turns</span>
+    summary = summarize(middle)     <span class="out"># compress older context</span>
+    <span class="cmd">return</span> [system] + [summary] + tail
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         SESSIONS
+         ================================================================== -->
+    <section class="section" id="sessions" style="background: var(--off-white);">
+        <div class="container">
+            <span class="section-label">Sessions</span>
+            <h2>Persistent Sessions</h2>
+            <p>Every conversation is automatically saved as a JSON file in <code>src/sessions/</code>. Session naming uses a collision-avoidance algorithm — if a name already exists, an incrementing suffix is appended to prevent data loss.</p>
+
+            <div class="two-col">
+                <div>
+                    <h3>File Format</h3>
+                    <p>Each session is a portable JSON file containing the full message array, timestamp, session name, and model used. Back them up, share them, or inspect them with any text editor.</p>
+                </div>
+                <div>
+                    <div class="code-block">
+<span class="cmd">{</span>
+  <span class="prompt">"session_name"</span>: <span class="out">"debug-2025-03-14"</span>,
+  <span class="prompt">"created"</span>:     <span class="out">"2025-03-14T18:22:00"</span>,
+  <span class="prompt">"messages"</span>:    <span class="out">[...]</span>,
+  <span class="prompt">"model"</span>:       <span class="out">"deepseek-chat"</span>
+<span class="cmd">}</span>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 2rem;">Startup Menu</h3>
+            <p>On launch, TzakGPT shows a numbered list of recent sessions with turn counts, model info, and timestamps. Pick one to resume exactly where you left off, or start fresh. Sessions are capped at 30, with older ones pruned automatically.</p>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         SETUP
+         ================================================================== -->
+    <section class="section" id="setup">
+        <div class="container">
+            <span class="section-label">Setup Guide</span>
+            <h2>Getting Started</h2>
+            <p>Install and configure TzakGPT in under five minutes.</p>
+
+            <ol class="step-list">
+                <li>
+                    <div>
+                        <h4>Clone the Repository</h4>
+                        <code>git clone https://github.com/GSigioltzakis/TzakGPT &amp;&amp; cd TzakGPT</code>
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <h4>Install Dependencies</h4>
+                        <code>pip install -r requirements.txt</code>
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <h4>Configure Environment</h4>
+                        <p>Copy the example file and add your DeepSeek API key.</p>
+                        <code>cp .env.example .env</code> &mdash; then edit <code>.env</code> with your <code>DEEP_KEY</code>
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <h4>Launch the Agent</h4>
+                        <code>python3 src/main.py</code>
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <h4>Begin Your Session</h4>
+                        <p>Select a session from the startup menu or start fresh. Type your first prompt and let TzakGPT help with file operations, code generation, and shell commands.</p>
+                    </div>
+                </li>
+            </ol>
+
+            <h3 style="margin-top: 2rem;">Requirements</h3>
+            <table class="tools-table" style="margin-top: 1rem;">
+                <thead>
+                    <tr>
+                        <th>Dependency</th>
+                        <th>Version</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Python</td>
+                        <td>3.10+</td>
+                        <td>Core runtime environment.</td>
+                    </tr>
+                    <tr>
+                        <td>prompt_toolkit</td>
+                        <td>3.x</td>
+                        <td>Rich terminal input with auto-completion and key bindings.</td>
+                    </tr>
+                    <tr>
+                        <td>Rich</td>
+                        <td>13.x</td>
+                        <td>Terminal formatting: tables, Markdown rendering, colored output.</td>
+                    </tr>
+                    <tr>
+                        <td>openai</td>
+                        <td>1.x</td>
+                        <td>API client for DeepSeek endpoint communication.</td>
+                    </tr>
+                    <tr>
+                        <td>python-dotenv</td>
+                        <td>1.x</td>
+                        <td>Loads .env variables into the runtime.</td>
+                    </tr>
+                    <tr>
+                        <td>readchar</td>
+                        <td>4.x</td>
+                        <td>Single-character input detection for X-to-interrupt.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin-top: 2rem;">Environment Variables</h3>
+            <table class="tools-table" style="margin-top: 1rem;">
+                <thead>
+                    <tr>
+                        <th>Variable</th>
+                        <th>Required</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>DEEP_KEY</code></td>
+                        <td>Yes</td>
+                        <td>Your DeepSeek API key.</td>
+                    </tr>
+                    <tr>
+                        <td><code>TZAK_BELL</code></td>
+                        <td>No</td>
+                        <td>Enable terminal bell — set to <code>true</code>, <code>1</code>, or <code>yes</code>.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ==================================================================
+         FOOTER
+         ================================================================== -->
+    <footer class="footer">
+        <div class="container footer-grid">
+            <div class="footer-col">
+                <span class="footer-brand">TzakGPT</span>
+                <span class="footer-tagline">Local AI Agent CLI — intelligent, transparent, and entirely under your control.</span>
+                <p>Created by <strong>George Sigioltzakis</strong> &middot; 2026.</p>
+            </div>
+            <div class="footer-col">
+                <h4>Navigate</h4>
+                <ul>
+                    <li><a href="#overview">Overview</a></li>
+                    <li><a href="#architecture">Architecture</a></li>
+                    <li><a href="#tools">Tools</a></li>
+                    <li><a href="#commands">Commands</a></li>
+                    <li><a href="#memory">Memory</a></li>
+                    <li><a href="#sessions">Sessions</a></li>
+                    <li><a href="#setup">Setup</a></li>
+                </ul>
+            </div>
+            <div class="footer-col">
+                <h4>Built With</h4>
+                <div class="tech-stack">
+                    <span>Python 3.10+</span>
+                    <span>DeepSeek</span>
+                    <span>prompt_toolkit</span>
+                    <span>Rich</span>
+                    <span>readchar</span>
+                    <span>python-dotenv</span>
+                    <span>openai</span>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="container">
+                <span>&copy; 2026 TzakGPT &middot; George Sigioltzakis &middot; MIT License.</span>
+                <span>
+                    <a href="https://github.com/GSigioltzakis/TzakGPT">GitHub</a>
+                    <span style="margin: 0 0.5rem; color: var(--text-muted);">&middot;</span>
+                    <a href="#overview">Top</a>
+                </span>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
