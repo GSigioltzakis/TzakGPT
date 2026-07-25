@@ -570,7 +570,7 @@ def show_token_line(turn_input: int, turn_output: int):
     )
     if totals["total"] > CONTEXT_WARNING_THRESHOLD:
         console.print(
-            "[yellow]  ⚠  context filling up — consider /clear or /save before continuing[/yellow]"
+            "[yellow]  \u26a0  context filling up — consider /clear or /save before continuing[/yellow]"
         )
 
 
@@ -802,6 +802,10 @@ def main():
     if _BELL_ENABLED:
         console.print("[dim]Completion bell: ON[/dim]")
 
+
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.document import Document
+
     tza_style = Style.from_dict(
         {
             "completion-menu.completion": "bg:#0f2b4a fg:#ffffff",
@@ -812,7 +816,23 @@ def main():
 
     slash_completer = SlashCompleter()
 
+    _paste_store = {"text": None}
+    kb = KeyBindings()
+
+    @kb.add("<bracketed-paste>")
+    def _handle_paste(event):
+        raw = event.data
+        pasted = raw.replace("\r\n", "\n").replace("\r", "\n")
+        lines_list = pasted.splitlines()
+        n_lines = len(lines_list) if lines_list else 1
+        n_chars = len(pasted)
+        _paste_store["text"] = pasted
+        tag = f"⟦ {n_lines} line{'s' if n_lines != 1 else ''} · {n_chars:,} chars ⟧"
+        buf = event.app.current_buffer
+        buf.set_document(Document(text=tag, cursor_position=len(tag)))
+
     while True:
+        _paste_store["text"] = None
         pt_color = "dodgerblue" if panel_color == "dodger_blue2" else "gold"
         model_tag = get_model_display()
         print()
@@ -823,7 +843,16 @@ def main():
             ),
             style=tza_style,
             completer=slash_completer,
+            key_bindings=kb,
         )
+
+        # Restore real paste content if bracketed-paste placeholder was submitted
+        if user_prompt.startswith("⟦") and _paste_store["text"] is not None:
+            closing = user_prompt.find("⟧")
+            suffix = user_prompt[closing + 1:].strip() if closing != -1 else ""
+            base = _paste_store["text"]
+            user_prompt = (base + " " + suffix).strip() if suffix else base
+            _paste_store["text"] = None
 
         if user_prompt.lower() in ["exit", "quit"]:
             console.print(f"[bold {panel_color}]Ciao![/bold {panel_color}]")
@@ -869,7 +898,7 @@ def main():
         subtitle_parts = [f"[dim]{elapsed:.2f}s[/dim]"]
         if tool_count > 0:
             subtitle_parts.append(f"[dim]{tool_count} tool{'s' if tool_count != 1 else ''} used[/dim]")
-        subtitle = " — ".join(subtitle_parts)
+        subtitle = " \u2014 ".join(subtitle_parts)
 
         rendered_markdown = Markdown(response)
         panel = Panel(

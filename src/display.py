@@ -1,9 +1,13 @@
 import re
 import shutil
+import sys
 import readchar
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 from rich import box
+
+
 
 console = Console()
 
@@ -37,6 +41,10 @@ _ACTION_STYLES = {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# Diff display
+# ---------------------------------------------------------------------------
 def show_diff(diff: list, action: str = "write"):
     if not diff:
         console.print("[dim]    No changes.[/dim]")
