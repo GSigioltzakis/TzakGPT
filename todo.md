@@ -1,7 +1,25 @@
-# TODOS:
+# Security Update & Bug Fix — Plan
 
-1) na min exei "tool iteretions maximum capacity filled"
--  **(afto me ta 10 iterations, etsi tha ftiaxoume kai tin mnimi tou AI, adi sto 11o prompt na kanei calculate ta tokens apo to proto prompt mexri to 10o (gia na vrei to 11o), tha kanei apo to miso + 1 promt kai meta. Diladi to 11o adi gia na kanei 1+2+3...+10=11, tha kanei (`ama dw 11 (i enan alo arithmo) tote floor(11/2)+1=6`) ara arxizo na metraw tta tokens apo to 6o prompt kai meta, gia oikonomia)**
-alla ena koubi gia otan theloume na stamatisei na SKEFTEE
-2) to "/" command fenete padou, prepei na ftiaxtei mono gia otan vlepei ton xaraktira "/" kai tipota alo.
-3) /save kai session files name fixes, ama idi iparxei ena arxeio me ena onoma tote pali ama tou dosoume neo untitled save na ginei se session_001. (giati tora ginotan ena chaos me tis imerominies kai to onoma den itan oreo sto mati).
+## Complete
+- [x] Read entire codebase for analysis
+- [x] Create plan (this file)
+- [x] **CRITICAL**: API key leaked — flagged; user must rotate manually
+- [x] **HIGH**: Path traversal in /save and /load → `_sanitize_filename()` added
+- [x] **HIGH**: No API timeout → `httpx.Timeout(60.0, connect=15.0)` added
+- [x] **MEDIUM**: Token thresholds 1.5M/3M → 300K/600K
+- [x] **MEDIUM**: max_iterations 100 → 25
+- [x] **MEDIUM**: Sliding window breaks on tool call messages → fixed
+- [x] **MEDIUM**: Double bell in agent_loop() → removed duplicate
+- [x] **MEDIUM**: Swallowed errors in `_apply_sliding_window()` → surfaced
+- [x] **LOW**: Dead code removed
+  - [x] `handle_tool_call()` in main.py
+  - [x] `restore_log()` / `restore_tokens()` in session.py
+  - [x] `classify_action()` in soul.py
+  - [x] `SHELL_ACTIONS` / `FILE_ACTIONS` in soul.py
+  - [x] `classify_action` import removed from main.py
+- [x] **LOW**: Client reuse → single `_get_client()` with lazy init
+- [x] **LOW**: generate_whitepaper.py font path → `matplotlib.font_manager` (cross-platform)
+- [x] **LOW**: `!d`/`!f` prefix documented → added to `/help` table
+- [x] **NIT**: .gitignore redundant `*.pyc` → removed
+- [x] **NIT**: .env.example cleanup
+
