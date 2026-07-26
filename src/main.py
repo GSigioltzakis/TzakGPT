@@ -562,7 +562,7 @@ def show_token_line(turn_input: int, turn_output: int):
     )
     if totals["total"] > CONTEXT_WARNING_THRESHOLD:
         console.print(
-            "[yellow]  \u26a0  context filling up — consider /clear or /save before continuing[/yellow]"
+            "[yellow]  ⚠  context filling up — consider /clear or /save before continuing[/yellow]"
         )
 
 
@@ -888,6 +888,7 @@ def main():
             continue
 
         conversation_history.append({"role": "user", "content": user_prompt})
+        session.increment_turn()
         payload, tools = build_payload(conversation_history)
 
         start = time.time()

@@ -53,7 +53,11 @@ def get_token_totals() -> dict:
 
 
 def add_tokens(input_tokens: int, output_tokens: int):
-    global _input_tokens, _output_tokens, _turns
+    global _input_tokens, _output_tokens
     _input_tokens += input_tokens
     _output_tokens += output_tokens
+
+
+def increment_turn():
+    global _turns
     _turns += 1

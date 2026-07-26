@@ -1,6 +1,6 @@
 # TzakGPT — Local AI Agent CLI
 
-![Image](./image.png)
+![Image](./docs/image.png)
 
 *A local, terminal-based AI assistant powered by DeepSeek. It streams responses with live Markdown rendering, reads files, edits code with visual diffs, runs shell commands, and remembers your sessions.*
 
