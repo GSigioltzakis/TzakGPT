@@ -1,4 +1,5 @@
 import os
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -7,6 +8,25 @@ load_dotenv(os.path.join(SCRIPT_DIR, "../.env"))
 
 # Default model — can be changed at runtime via set_model()
 _model = "deepseek-v4-flash"
+
+# Reusable API client — created once, shared across calls
+_client: OpenAI | None = None
+_timeout = httpx.Timeout(60.0, connect=15.0)
+
+
+def _get_client() -> OpenAI:
+    """Return a lazily-initialised OpenAI client pointed at DeepSeek."""
+    global _client
+    if _client is None:
+        api_key = os.getenv("DEEP_KEY")
+        if not api_key:
+            raise RuntimeError("DEEP_KEY not found in environment.")
+        _client = OpenAI(
+            base_url="https://api.deepseek.com",
+            api_key=api_key,
+            timeout=_timeout,
+        )
+    return _client
 
 
 def set_model(model: str):
@@ -30,12 +50,7 @@ def get_model_display() -> str:
 def ask_deepseek(history, tools=None):
     """Non-streaming call — used for summaries and internal tasks."""
     try:
-        api_key = os.getenv("DEEP_KEY")
-        if not api_key:
-            return None, "DeepSeek Error: DEEP_KEY not found in environment.", {"input": 0, "output": 0}
-
-        client = OpenAI(base_url="https://api.deepseek.com", api_key=api_key)
-
+        client = _get_client()
         kwargs = {"model": _model, "messages": history}
         if tools:
             kwargs["tools"] = tools
@@ -68,12 +83,11 @@ def ask_deepseek_stream(history, tools=None):
         ("done", str, dict)        — final full text + usage dict
         ("error", str)             — error message
     """
-    api_key = os.getenv("DEEP_KEY")
-    if not api_key:
-        yield ("error", "DeepSeek Error: DEEP_KEY not found in environment.")
+    try:
+        client = _get_client()
+    except RuntimeError as e:
+        yield ("error", str(e))
         return
-
-    client = OpenAI(base_url="https://api.deepseek.com", api_key=api_key)
 
     kwargs = {"model": _model, "messages": history, "stream": True}
     if tools:
