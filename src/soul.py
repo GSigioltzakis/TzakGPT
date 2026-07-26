@@ -3,9 +3,6 @@ import json
 import session
 import clients
 
-SHELL_ACTIONS = {"run_command"}
-FILE_ACTIONS = {"read_file", "write_file", "list_directory"}
-
 TOOLS_DEFINITION = [
     {
         "type": "function",
@@ -100,9 +97,18 @@ def _apply_sliding_window(conversation_history: list) -> list:
 
     Uses a dynamic keep window: for N user turns, keeps from floor(N/2)+1 onward.
     Conversations with 6 or fewer user turns are left untouched.
+
+    The split point is determined by counting actual user-role messages
+    (rather than assuming a fixed 2-messages-per-turn pattern) so that
+    tool-call and tool-result messages between assistant and user are
+    handled correctly.
     """
-    user_turns = [m for m in conversation_history if m.get("role") == "user"]
-    n = len(user_turns)
+    # Count user turns and find the split index in the actual message list
+    n = 0
+    split_index = 0
+    for i, m in enumerate(conversation_history):
+        if m.get("role") == "user":
+            n += 1
 
     # Don't collapse small conversations
     if n <= 6:
@@ -110,8 +116,16 @@ def _apply_sliding_window(conversation_history: list) -> list:
 
     # Keep from floor(n/2)+1 onward (1-based user-turn index)
     keep_from_turn = n // 2 + 1
-    # Convert to 0-based message index: user turns alternate starting at index 0
-    split_index = (keep_from_turn - 1) * 2
+
+    # Walk through again to find the message index of the keep_from_turn-th user message
+    user_count = 0
+    split_index = 0
+    for i, m in enumerate(conversation_history):
+        if m.get("role") == "user":
+            user_count += 1
+            if user_count == keep_from_turn:
+                split_index = i
+                break
 
     if split_index <= 0:
         return conversation_history
@@ -128,21 +142,18 @@ def _apply_sliding_window(conversation_history: list) -> list:
         kind, message, _ = clients.ask_deepseek(summary_messages)
         if kind == "text" and message:
             summary_text = message.strip()
+        elif kind is None and isinstance(message, str):
+            # API returned an error — surface it rather than swallowing
+            raise ValueError(message)
         else:
-            raise ValueError("Unexpected response from summary call")
+            raise ValueError(f"Unexpected response from summary call (kind={kind})")
     except Exception as e:
         session.record("window_summary", f"Failed: {e}", error=True)
         return conversation_history
 
     summary_msg = {"role": "system", "content": f"Summary of earlier conversation: {summary_text}"}
-    session.record("window_summary", f"Collapsed {len(old_part)//2} turns into summary")
+    session.record("window_summary", f"Collapsed {len(old_part)} messages ({n - (keep_from_turn - 1)} turns kept)")
     return [summary_msg] + recent_part
-
-
-def classify_action(tool_name: str) -> str:
-    if tool_name in SHELL_ACTIONS:
-        return "shell"
-    return "file"
 
 
 def build_payload(conversation_history: list) -> tuple:
