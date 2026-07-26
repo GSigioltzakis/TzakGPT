@@ -15,7 +15,7 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from clients import ask_deepseek, ask_deepseek_stream, set_model, get_model_display
-from soul import build_payload, classify_action, GREETINGS, SYSTEM_PROMPT
+from soul import build_payload, GREETINGS, SYSTEM_PROMPT
 from tools import read_file, write_file, run_command, list_directory
 from display import show_diff, show_action, show_result, confirm_command
 
@@ -48,8 +48,8 @@ console = Console()
 
 SESSION_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
-CONTEXT_WARNING_THRESHOLD = 1_500_000
-MAX_CONTEXT_TOKENS = 3_000_000
+CONTEXT_WARNING_THRESHOLD = 300_000
+MAX_CONTEXT_TOKENS = 600_000
 
 _BELL_ENABLED = os.getenv("TZAK_BELL", "").strip().lower() in ("true", "1", "yes")
 
@@ -70,6 +70,12 @@ SLASH_COMMANDS = {
     "/load":   "Load a saved session",
     "/model":  "Switch model: /model pro  or  /model flash",
     "/bell":   "Toggle completion bell on / off",
+}
+
+# Prefixes (not slash commands, but documented for discoverability)
+_COLOR_PREFIXES = {
+    "!f": "Switch panel colour to dodger blue (Flash)",
+    "!d": "Switch panel colour to gold (Pro)",
 }
 
 
@@ -129,12 +135,12 @@ class SlashCompleter(Completer):
 
 def get_header_text() -> str:
     logo = r"""
-████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ██████╗ ████████╗
-╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ██╔══██╗╚══██╔══╝
-   ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝   ██║
-   ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝    ██║
-   ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║        ██║
-   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝        ╚═╝
+████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ██████╗ ██████████╗
+╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ╚═══██╗ ╚══██╔══╝
+   ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝    ██║
+   ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝     ██║
+   ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║         ██║
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝         ╚═╝
     """
     greeting = random.choice(GREETINGS)
     return (
@@ -143,6 +149,22 @@ def get_header_text() -> str:
         f"[italic pale_green1]{greeting}[/]\n"
         "[dim]Type 'exit' or 'quit' to close the app.[/dim]"
     )
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip path separators and reject traversal attempts.
+
+    Returns a clean basename.  Raises ValueError if the name is dangerous.
+    """
+    if not name or not name.strip():
+        raise ValueError("Empty filename")
+    # Take only the basename — discard any directory components
+    clean = os.path.basename(name.strip())
+    if not clean or clean in (".", ".."):
+        raise ValueError("Invalid filename")
+    if ".." in clean or os.sep in clean or "/" in clean:
+        raise ValueError("Path traversal rejected")
+    return clean
 
 
 def _next_sequential_name() -> str:
@@ -161,8 +183,16 @@ def _next_sequential_name() -> str:
 
 
 def _unique_path(filename: str) -> str:
-    """Return a unique save path, auto-incrementing a counter if the file exists."""
-    base, ext = os.path.splitext(filename)
+    """Return a unique save path, auto-incrementing a counter if the file exists.
+
+    The filename is sanitised to prevent path-traversal attacks.
+    """
+    clean = _sanitize_filename(filename)
+    if not clean.endswith(".json"):
+        clean += ".json"
+    # Strip any .json that _sanitize_filename might have included so we
+    # don't double-up, then re-add.
+    base, ext = os.path.splitext(clean)
     if ext != ".json":
         ext = ".json"
     candidate = os.path.join(SESSION_DIR, f"{base}{ext}")
@@ -271,9 +301,16 @@ def load_session(conversation_history, filename=None):
             console.print("[dim]Cancelled.[/dim]")
             return False
 
-    load_path = os.path.join(SESSION_DIR, filename)
+    # Sanitise user-supplied filename to prevent path traversal
+    try:
+        safe_name = _sanitize_filename(filename)
+    except ValueError:
+        console.print(f"[yellow]Invalid filename: {filename}[/yellow]")
+        return False
+
+    load_path = os.path.join(SESSION_DIR, safe_name)
     if not os.path.exists(load_path):
-        console.print(f"[yellow]File not found: {filename}[/yellow]")
+        console.print(f"[yellow]File not found: {safe_name}[/yellow]")
         return False
 
     with open(load_path, "r", encoding="utf-8") as f:
@@ -288,58 +325,14 @@ def load_session(conversation_history, filename=None):
     session._output_tokens = token_data.get("output", 0)
     session._turns = token_data.get("turns", 0)
 
-    console.print(f"[dim]Session restored: {filename}[/dim]")
-    session.record("load_session", filename)
+    console.print(f"[dim]Session restored: {safe_name}[/dim]")
+    session.record("load_session", safe_name)
     return True
-
-
-def handle_tool_call(tool_call, conversation_history) -> str:
-    """Execute a single tool call and return the JSON result string for the API."""
-    name = tool_call.function.name
-    args = json.loads(tool_call.function.arguments)
-
-    if name == "read_file":
-        show_action("Reading", args["path"])
-        result = read_file(args["path"])
-        session.record("read_file", args["path"])
-    elif name == "write_file":
-        show_action("Writing", args["path"])
-        diff = write_file(args["path"], args["content"])
-        show_diff(diff)
-        result = f"File written: {args['path']}"
-        session.record("write_file", args["path"])
-    elif name == "list_directory":
-        path = args.get("path", ".")
-        show_action("Listing", path)
-        data = list_directory(path)
-        result = json.dumps(data)
-        session.record("list_directory", path)
-    elif name == "run_command":
-        cmd = args["cmd"]
-        choice = confirm_command(cmd)
-        if isinstance(choice, tuple) and choice[0] == "e":
-            cmd = choice[1]
-            choice = confirm_command(cmd)
-        if choice == "n":
-            result = "User declined to run the command."
-            session.record("run_command", cmd, error=False)
-        else:
-            show_action("Running", cmd)
-            result = run_command(cmd)
-            show_result(result)
-            is_error = result.startswith("ERROR:")
-            session.record("run_command", cmd, error=is_error)
-    else:
-        result = f"Unknown tool: {name}"
-
-    return json.dumps(
-        {"tool_call_id": tool_call.id, "name": name, "result": result}
-    )
 
 
 def agent_loop(conversation_history, payload, tools, panel_color):
     """Streaming chat loop. Returns (response_text, usage_tuple, tool_count)."""
-    max_iterations = 100
+    max_iterations = 25
     iteration = 0
     turn_input = 0
     turn_output = 0
@@ -513,7 +506,6 @@ def agent_loop(conversation_history, payload, tools, panel_color):
                         elapsed = time.time() - tool_start
                         if elapsed > 2:
                             console.print(f"[dim]  Took {elapsed:.1f}s[/dim]")
-                        if elapsed > 2:
                             _ring_bell()
 
                 result_data = json.dumps(
@@ -575,12 +567,17 @@ def show_token_line(turn_input: int, turn_output: int):
 
 
 def _slash_command_table() -> Table:
-    """Return a Rich Table listing all slash commands."""
-    table = Table(title="Slash Commands", title_style="bold cyan", box=None)
+    """Return a Rich Table listing all slash commands and prefixes."""
+    table = Table(title="Commands & Shortcuts", title_style="bold cyan", box=None)
     table.add_column("Command", style="bold dodger_blue2", width=10)
     table.add_column("Description", style="dim")
     for cmd, desc in SLASH_COMMANDS.items():
         table.add_row(cmd, desc)
+    table.add_section()
+    table.add_row("")
+    table.add_row("[bold]Prefixes[/bold]", "")
+    for prefix, desc in _COLOR_PREFIXES.items():
+        table.add_row(prefix, desc)
     return table
 
 
@@ -777,21 +774,31 @@ def main():
         )
         user_input = input().strip()
         if user_input:
-            filename = user_input if user_input.endswith(".json") else user_input + ".json"
-            load_path = os.path.join(SESSION_DIR, filename)
-            if os.path.exists(load_path):
-                with open(load_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                conversation_history.extend(data.get("conversation_history", []))
-                session._log = data.get("session_log", [])
-                token_data = data.get("token_totals", {})
-                session._input_tokens = token_data.get("input", 0)
-                session._output_tokens = token_data.get("output", 0)
-                session._turns = token_data.get("turns", 0)
-                console.print(f"[dim]Session restored: {os.path.basename(load_path)}[/dim]")
-            else:
-                console.print(f"[yellow]Session file not found: {filename}[/yellow]")
+            # Sanitise startup session filename
+            try:
+                safe_name = _sanitize_filename(user_input)
+            except ValueError:
+                console.print(f"[yellow]Invalid filename: {user_input}[/yellow]")
                 console.print("[dim]Starting fresh.[/dim]")
+                safe_name = None
+
+            if safe_name:
+                if not safe_name.endswith(".json"):
+                    safe_name += ".json"
+                load_path = os.path.join(SESSION_DIR, safe_name)
+                if os.path.exists(load_path):
+                    with open(load_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    conversation_history.extend(data.get("conversation_history", []))
+                    session._log = data.get("session_log", [])
+                    token_data = data.get("token_totals", {})
+                    session._input_tokens = token_data.get("input", 0)
+                    session._output_tokens = token_data.get("output", 0)
+                    session._turns = token_data.get("turns", 0)
+                    console.print(f"[dim]Session restored: {os.path.basename(load_path)}[/dim]")
+                else:
+                    console.print(f"[yellow]Session file not found: {safe_name}[/yellow]")
+                    console.print("[dim]Starting fresh.[/dim]")
     else:
         console.print(header_content)
 
@@ -827,7 +834,7 @@ def main():
         n_lines = len(lines_list) if lines_list else 1
         n_chars = len(pasted)
         _paste_store["text"] = pasted
-        tag = f"⟦ {n_lines} line{'s' if n_lines != 1 else ''} · {n_chars:,} chars ⟧"
+        tag = f"\u27e6 {n_lines} line{'s' if n_lines != 1 else ''} \u00b7 {n_chars:,} chars \u27e7"
         buf = event.app.current_buffer
         buf.set_document(Document(text=tag, cursor_position=len(tag)))
 
@@ -839,7 +846,7 @@ def main():
         user_prompt = prompt(
             HTML(
                 f'<style color="#888888">[{model_tag}]</style> '
-                f'<b><style color="{pt_color}">You ❯</style></b> '
+                f'<b><style color="{pt_color}">You \u276f</style></b> '
             ),
             style=tza_style,
             completer=slash_completer,
@@ -847,8 +854,8 @@ def main():
         )
 
         # Restore real paste content if bracketed-paste placeholder was submitted
-        if user_prompt.startswith("⟦") and _paste_store["text"] is not None:
-            closing = user_prompt.find("⟧")
+        if user_prompt.startswith("\u27e6") and _paste_store["text"] is not None:
+            closing = user_prompt.find("\u27e7")
             suffix = user_prompt[closing + 1:].strip() if closing != -1 else ""
             base = _paste_store["text"]
             user_prompt = (base + " " + suffix).strip() if suffix else base
