@@ -57,15 +57,3 @@ def add_tokens(input_tokens: int, output_tokens: int):
     _input_tokens += input_tokens
     _output_tokens += output_tokens
     _turns += 1
-
-
-def restore_log(entries: list):
-    global _log
-    _log = entries
-
-
-def restore_tokens(totals: dict):
-    global _input_tokens, _output_tokens, _turns
-    _input_tokens = totals.get("input", 0)
-    _output_tokens = totals.get("output", 0)
-    _turns = totals.get("turns", 0)
