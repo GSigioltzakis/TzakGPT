@@ -17,6 +17,11 @@ def write_file(path: str, new_content: str) -> list:
         with open(path, "r", encoding="utf-8") as f:
             old_content = f.read()
 
+    # Ensure parent directories exist before writing
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
     with open(path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
