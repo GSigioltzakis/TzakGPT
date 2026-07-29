@@ -1,4 +1,4 @@
-# TzakGPT — Local AI Agent CLI
+# TzakGPT — Local AI Agent TUI
 
 ![Image](./docs/image.png)
 

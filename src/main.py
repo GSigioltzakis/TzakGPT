@@ -135,8 +135,8 @@ class SlashCompleter(Completer):
 
 def get_header_text() -> str:
     logo = r"""
-████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ██████╗ ██████████╗
-╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ╚═══██╗ ╚══██╔══╝
+████████╗███████╗ █████╗ ██╗  ██╗ ██████╗ ███████╗█████████╗
+╚══██╔══╝╚══███╔╝██╔══██╗██║ ██╔╝██╔════╝ ╚════██╗ ╚══██╔══╝
    ██║     ███╔╝ ███████║█████╔╝ ██║  ███╗██████╔╝    ██║
    ██║    ███╔╝  ██╔══██║██╔═██╗ ██║   ██║██╔═══╝     ██║
    ██║   ███████╗██║  ██║██║  ██╗╚██████╔╝██║         ██║
@@ -145,7 +145,7 @@ def get_header_text() -> str:
     greeting = random.choice(GREETINGS)
     return (
         f"[bold dodger_blue2]{logo}[/bold dodger_blue2]\n"
-        f"[bold cyan]Welcome to TzakGPT AI agent CLI.[/bold cyan]\n"
+        f"[bold cyan]Welcome to TzakGPT AI agent TUI.[/bold cyan]\n"
         f"[italic pale_green1]{greeting}[/]\n"
         "[dim]Type 'exit' or 'quit' to close the app.[/dim]"
     )
@@ -528,7 +528,7 @@ def _build_token_bar(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) ->
     """Return a 10-character progress bar showing context usage."""
     fill = min(total_tokens / max_tokens, 1.0)
     filled_blocks = int(fill * 10)
-    return "\u2588" * filled_blocks + "\u2591" * (10 - filled_blocks)
+    return "█" * filled_blocks + "░" * (10 - filled_blocks)
 
 
 def _token_bar_style(total_tokens: int, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
